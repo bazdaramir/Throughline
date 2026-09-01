@@ -194,15 +194,27 @@ claude plugin marketplace add ./
 claude plugin install throughline@throughline
 ```
 
-**3 · Point a repository at the vault.** In any project you want tracked, start Claude Code and run:
+**3 · Tell Throughline where the vault is.** Vault resolution goes `$THROUGHLINE_VAULT` → the
+`vault:` line in the repo's `.throughline` → `~/Throughline`. On a fresh clone the vault sits inside
+the repository rather than at the fallback path, so set the variable once, in your shell profile:
+
+```bash
+export THROUGHLINE_VAULT="/absolute/path/to/Throughline/vault/Throughline"
+```
+
+Skip this only if you move or symlink `vault/Throughline` to `~/Throughline`. Without one of the
+two, `/throughline:init` reports that no vault was found, and the SessionStart hook stays silent —
+by design, since it can never block a session.
+
+**4 · Point a repository at the vault.** In any project you want tracked, start Claude Code and run:
 
 ```
 /throughline:init
 ```
 
-That writes a `.throughline` pointer file in the repo root and creates the project's partition in
-the vault. Then map your main source directory, which is what the whole retrieval layer joins
-against:
+That writes a `.throughline` pointer file in the repo root, with an explicit `vault:` line, and
+creates the project's partition in the vault. Then map your main source directory, which is what the
+whole retrieval layer joins against:
 
 ```
 /throughline:map src/

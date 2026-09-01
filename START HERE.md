@@ -33,7 +33,15 @@ claude plugin marketplace add ./
 claude plugin install throughline@throughline
 ```
 
-Then run `/throughline:init` inside any repository you want tracked.
+Then point Throughline at the vault — resolution is `$THROUGHLINE_VAULT` → the `vault:` line in a
+repo's `.throughline` → `~/Throughline`, and the vault lives inside this repository rather than at
+the fallback:
+
+```bash
+export THROUGHLINE_VAULT="/absolute/path/to/Throughline/vault/Throughline"
+```
+
+Now run `/throughline:init` inside any repository you want tracked.
 
 The vault works without the plugin — open `90 Templates/` and write a note by hand. The plugin only
 removes the typing.
