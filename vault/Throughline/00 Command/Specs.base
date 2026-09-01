@@ -1,0 +1,18 @@
+filters:
+  and:
+    - 'type == "spec"'
+views:
+  - type: table
+    name: All specs
+    order:
+      - file.name
+      - note.status
+      - note.risk
+      - note.affects
+      - note.estimate
+      - note.created
+    sort:
+      - property: note.status
+        direction: ASC
+      - property: note.created
+        direction: DESC

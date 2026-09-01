@@ -1,0 +1,14 @@
+filters:
+  and:
+    - 'file.name == "_Project"'
+views:
+  - type: cards
+    name: Projects
+    order:
+      - file.folder
+      - note.status
+      - note.stack
+      - note.updated
+    sort:
+      - property: note.updated
+        direction: DESC

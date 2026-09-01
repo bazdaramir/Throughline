@@ -1,0 +1,29 @@
+filters:
+  and:
+    - type == "session"
+views:
+  - type: list
+    name: Recent sessions
+    order:
+      - file.name
+      - project
+      - branch
+      - outcome
+      - duration
+    sort:
+      - property: created
+        direction: DESC
+    limit: 50
+  - type: table
+    name: With open threads
+    filters:
+      and:
+        - "!open_threads.isEmpty()"
+    order:
+      - file.name
+      - project
+      - branch
+      - open_threads
+    sort:
+      - property: created
+        direction: DESC

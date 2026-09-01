@@ -1,0 +1,46 @@
+filters:
+  or:
+    - status == "draft"
+    - file.hasTag("tl/draft")
+    - file.hasTag("tl/needs-review")
+    - and:
+        - type != "session"
+        - type != "hub"
+        - last_verified.isEmpty()
+        - created < now() - duration('7d')
+    - expires < now()
+    - and:
+        - type == "decision"
+        - status == "active"
+        - last_verified < now() - duration('90d')
+views:
+  - type: table
+    name: Needs review
+    order:
+      - file.name
+      - type
+      - project
+      - status
+      - severity
+      - expires
+      - last_verified
+      - updated
+    sort:
+      - property: severity
+        direction: ASC
+      - property: updated
+        direction: ASC
+  - type: table
+    name: Drafts awaiting promotion
+    filters:
+      or:
+        - file.hasTag("tl/draft")
+    order:
+      - file.name
+      - type
+      - project
+      - source
+      - created
+    sort:
+      - property: created
+        direction: ASC

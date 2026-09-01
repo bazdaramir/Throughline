@@ -1,0 +1,30 @@
+{
+  "description": "Throughline automation. Exactly two hooks: SessionStart injects a deterministic context brief (W7); SessionEnd spawns detached distillation of the session (W1). Restraint here is a product decision - two hooks that never annoy anyone beat five that get disabled in week one.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/bin/tl-brief\" 2>/dev/null || true",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "shell": "bash",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/bin/tl-session-end\" 2>/dev/null || true",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

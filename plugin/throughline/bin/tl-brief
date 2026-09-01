@@ -1,0 +1,224 @@
+#!/bin/sh
+# tl-brief - Throughline SessionStart context brief (W7)
+#
+# DETERMINISTIC. NO MODEL CALL. Uses only git, awk and shell builtins.
+# The brief is assembled by path matching, which means it is instant, free, and
+# structurally incapable of inventing a decision the user never wrote.
+#
+# HARD RULES:
+#   - Never block session start. Every path exits 0.
+#   - Never exceed the output budget (~400 tokens).
+#   - Never include a note tagged #tl/draft.
+#   - Never include a Session note body - only open_threads.
+#   - Only status: active Decisions and status: open Gotchas.
+#
+# PERFORMANCE: the <2s budget is a hard limit and process spawns dominate the
+# cost, so frontmatter is extracted in bulk - one awk pass per note type.
+# Do not reintroduce per-file grep/sed loops.
+
+set -u
+
+BUDGET_CHARS=1500       # ~400 tokens at a conservative ~3.75 chars/token
+S='@@'                  # field separator; cannot occur in a note title or path
+
+# ---------------------------------------------------------------- guards ---
+# Any failure here means "say nothing", never "fail loudly".
+
+[ -f ./.throughline ] || exit 0
+
+proj=$(sed -n 's/^project:[[:space:]]*//p' ./.throughline 2>/dev/null | head -1 | tr -d '\r')
+[ -n "$proj" ] || exit 0
+
+vault="${THROUGHLINE_VAULT:-}"
+if [ -z "$vault" ]; then
+  vault=$(sed -n 's/^vault:[[:space:]]*//p' ./.throughline 2>/dev/null | head -1 | tr -d '\r')
+fi
+[ -n "$vault" ] || vault="$HOME/Throughline"
+case "$vault" in
+  '~/'*) vault="$HOME/${vault#\~/}" ;;
+  '~')   vault="$HOME" ;;
+esac
+
+[ -d "$vault/00 Command" ] || exit 0
+pdir="$vault/01 Projects/$proj"
+[ -d "$pdir/Components" ] || exit 0
+
+command -v git >/dev/null 2>&1 || exit 0
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
+
+# ------------------------------------------------------- the changed set ---
+branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '')
+changed=$(
+  {
+    git status --porcelain 2>/dev/null | cut -c4-
+    git diff --name-only HEAD~3 2>/dev/null || git diff --name-only HEAD 2>/dev/null
+  } | sed 's/^"//; s/"$//' | grep -v '^$' | sort -u
+)
+[ -n "$changed" ] || exit 0
+
+# --------------------------------------------------- bulk frontmatter awk ---
+# Shared prologue: walks only the frontmatter block, tracks the tl/draft
+# quarantine, and collects the fields each note type needs.
+AWK_FM='
+function base(p,   n,a) { n = split(p, a, "/"); p = a[n]; sub(/\.md$/, "", p); return p }
+function quoted(line,   out, s) {
+  out = ""
+  while (match(line, /"[^"]*"/)) {
+    s = substr(line, RSTART + 1, RLENGTH - 2)
+    out = out (out ? SEP : "") s
+    line = substr(line, RSTART + RLENGTH)
+  }
+  return out
+}
+FNR == 1 {
+  flush()
+  f = FILENAME; draft = 0; infm = 0; nfm = 0
+  status = ""; rc = ""; cost = ""; sev = ""; br = ""
+  paths = ""; affects = ""; threads = ""
+}
+/^---[ \t]*$/ { nfm++; infm = (nfm == 1); next }
+!infm { next }
+/^[ \t]*-[ \t]*tl\/draft[ \t]*$/ { draft = 1 }
+/^status:/        { status = $2 }
+/^reversal_cost:/ { rc = $2 }
+/^severity:/      { sev = $2 }
+/^branch:/        { br = $2 }
+/^cost:/          { cost = $2; gsub(/"/, "", cost) }
+/^paths:/         { paths = quoted($0) }
+/^affects:/       { affects = $0 }
+/^open_threads:/  { threads = quoted($0) }
+'
+
+# --------------------------------------- changed paths -> Components -------
+comp_rows=$(awk -v SEP="$S" "$AWK_FM"'
+function flush() { if (f != "" && !draft && paths != "") print base(f) SEP paths }
+END { flush() }
+' "$pdir"/Components/*.md 2>/dev/null)
+
+comp_names=''
+oldIFS=$IFS
+IFS='
+'
+for row in $comp_rows; do
+  cname=${row%%$S*}
+  rest=${row#*$S}
+  hit=0
+  # remaining fields are the component's paths, separated by $S
+  while [ -n "$rest" ]; do
+    cp=${rest%%$S*}
+    case "$rest" in *"$S"*) rest=${rest#*$S} ;; *) rest='' ;; esac
+    [ -n "$cp" ] || continue
+    for ch in $changed; do
+      case "$ch" in "$cp"*) hit=1 ;; esac
+      [ "$hit" = 1 ] && break
+    done
+    [ "$hit" = 1 ] && break
+  done
+  [ "$hit" = 1 ] && comp_names="$comp_names$cname
+"
+done
+IFS=$oldIFS
+[ -n "$comp_names" ] || exit 0
+
+# --------------------------------- Components -> Decisions / Gotchas -------
+# Only promoted notes in the required status ever reach the shell.
+dec_rows=$(awk -v SEP="$S" "$AWK_FM"'
+function flush() { if (f != "" && !draft && status == "active" && affects != "") print base(f) SEP rc SEP affects }
+END { flush() }
+' "$pdir"/Decisions/*.md 2>/dev/null)
+
+got_rows=$(awk -v SEP="$S" "$AWK_FM"'
+function flush() { if (f != "" && !draft && status == "open" && affects != "") print base(f) SEP sev SEP cost SEP affects }
+END { flush() }
+' "$pdir"/Gotchas/*.md 2>/dev/null)
+
+decisions=''; gotchas=''; ndec=0; ngot=0
+
+IFS='
+'
+for row in $dec_rows; do
+  dbase=${row%%$S*};  rest=${row#*$S}
+  rc=${rest%%$S*};    aff=${rest#*$S}
+  for cname in $comp_names; do
+    case "$aff" in
+      *"$cname"*)
+        case "$rc" in
+          irreversible) mark='  !! irreversible - do not contradict without asking' ;;
+          '')           mark='' ;;
+          *)            mark="  reversal_cost: $rc" ;;
+        esac
+        decisions="$decisions    [[$dbase]]$mark
+"
+        ndec=$((ndec + 1))
+        break ;;
+    esac
+  done
+done
+
+for row in $got_rows; do
+  gbase=${row%%$S*};  rest=${row#*$S}
+  sev=${rest%%$S*};   rest=${rest#*$S}
+  cost=${rest%%$S*};  aff=${rest#*$S}
+  for cname in $comp_names; do
+    case "$aff" in
+      *"$cname"*)
+        meta=''
+        [ -n "$sev" ]  && meta="  $sev"
+        [ -n "$cost" ] && meta="$meta  cost: $cost"
+        gotchas="$gotchas    [[$gbase]]$meta
+"
+        ngot=$((ngot + 1))
+        break ;;
+    esac
+  done
+done
+IFS=$oldIFS
+
+# ----------------------------------- last session's open threads (only) ----
+# ONLY the open_threads property is read. A Session note body is never touched.
+threads=''
+if [ -d "$pdir/Sessions" ]; then
+  threads=$(awk -v SEP="$S" -v want="$branch" "$AWK_FM"'
+function flush() { if (f != "" && threads != "" && (want == "" || br == want)) last = threads }
+END {
+  flush()
+  if (last != "") { n = split(last, a, SEP); for (i = 1; i <= n; i++) print a[i] }
+}
+' "$pdir"/Sessions/*.md 2>/dev/null)
+fi
+
+[ "$ndec" -gt 0 ] || [ "$ngot" -gt 0 ] || [ -n "$threads" ] || exit 0
+
+# --------------------------------------------------------------- render ---
+out=$(
+  printf 'THROUGHLINE * %s' "$proj"
+  [ -n "$branch" ] && printf ' * %s' "$branch"
+  printf '\n'
+  if [ "$ndec" -gt 0 ]; then
+    printf '\n  %s active decision(s) touch your changed files\n' "$ndec"
+    printf '%s' "$decisions"
+  fi
+  if [ "$ngot" -gt 0 ]; then
+    printf '\n  %s open gotcha(s) in files you are changing\n' "$ngot"
+    printf '%s' "$gotchas"
+  fi
+  if [ -n "$threads" ]; then
+    printf '\n  From your last session:\n'
+    printf '%s\n' "$threads" | while IFS= read -r t; do
+      [ -n "$t" ] && printf '    ... %s\n' "$t"
+    done
+  fi
+  printf '\n  Run /throughline:brief <area> for depth.\n'
+)
+
+# ------------------------------------------------ hard truncate at budget ---
+if [ "${#out}" -gt "$BUDGET_CHARS" ]; then
+  printf 'THROUGHLINE * %s' "$proj"
+  [ -n "$branch" ] && printf ' * %s' "$branch"
+  printf '\n\n  %s active decision(s), %s open gotcha(s) touch your changed files.\n' "$ndec" "$ngot"
+  printf '  Too much to summarise inside the budget - run /throughline:brief <area>.\n'
+  exit 0
+fi
+
+printf '%s\n' "$out"
+exit 0

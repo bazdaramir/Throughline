@@ -1,0 +1,141 @@
+#!/bin/sh
+# tl-validate - static checks over the Throughline repository.
+#
+# Everything here is checkable without opening Obsidian. The things that are NOT
+# checkable headlessly - whether a .base file actually renders - live in
+# vault/Throughline/98 Meta/VERIFY.md and need human eyes.
+#
+# Exits non-zero on the first failing check so it is usable as a gate.
+
+set -u
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+vault="$root/vault/Throughline"
+plugin="$root/plugin/throughline"
+fail=0
+
+say()  { printf '%s\n' "$*"; }
+ok()   { printf '  ok    %s\n' "$*"; }
+bad()  { printf '  FAIL  %s\n' "$*"; fail=$((fail + 1)); }
+
+say ''
+say 'Throughline · static validation'
+say '================================'
+
+# ---------------------------------------------------------------- shell ---
+say ''
+say 'Hook scripts parse as POSIX sh'
+for f in "$plugin"/bin/*; do
+  [ -f "$f" ] || continue
+  if sh -n "$f" 2>/dev/null; then ok "$(basename "$f")"; else bad "$(basename "$f") - syntax error"; fi
+done
+
+# ----------------------------------------------------------------- json ---
+say ''
+say 'Manifests are valid JSON'
+for f in "$root/.claude-plugin/marketplace.json" "$plugin/.claude-plugin/plugin.json" "$plugin/hooks/hooks.json"; do
+  [ -f "$f" ] || { bad "${f#$root/} - missing"; continue; }
+  if node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$f" 2>/dev/null; then
+    ok "${f#$root/}"
+  else
+    bad "${f#$root/} - malformed"
+  fi
+done
+
+# -------------------------------------------------------------- inventory ---
+# The plugin's shape is a product constraint, not an accident: two hooks that
+# never annoy anyone beat five that get disabled in week one.
+say ''
+say 'Plugin inventory matches the declared shape'
+nskills=$(find "$plugin/skills" -name SKILL.md 2>/dev/null | wc -l | tr -d ' ')
+nagents=$(find "$plugin/agents" -name '*.md' 2>/dev/null | wc -l | tr -d ' ')
+nhooks=$(grep -c '"type": "command"' "$plugin/hooks/hooks.json" 2>/dev/null || echo 0)
+nmcp=$(find "$plugin" -name '.mcp.json' -o -name 'mcp.json' 2>/dev/null | wc -l | tr -d ' ')
+[ "$nskills" = 12 ] && ok "12 skills"           || bad "expected 12 skills, found $nskills"
+[ "$nagents" = 2 ]  && ok "2 subagents"         || bad "expected 2 subagents, found $nagents"
+[ "$nhooks"  = 2 ]  && ok "2 hooks"             || bad "expected 2 hooks, found $nhooks"
+[ "$nmcp"    = 0 ]  && ok "0 MCP servers"       || bad "expected 0 MCP servers, found $nmcp"
+
+# --------------------------------------------------------- skill frontmatter ---
+say ''
+say 'Every skill declares name and description'
+for f in "$plugin"/skills/*/SKILL.md; do
+  n=$(basename "$(dirname "$f")")
+  if head -6 "$f" | grep -q '^name:' && head -6 "$f" | grep -q '^description:'; then
+    ok "$n"
+  else
+    bad "$n - missing name: or description:"
+  fi
+done
+
+# --------------------------------------------------------------- the vault ---
+say ''
+say 'Vault notes parse and link'
+node - "$vault" <<'NODE'
+const fs = require('fs'), path = require('path');
+const root = process.argv[2];
+const mds = [], bases = [];
+(function walk(d) {
+  for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+    if (e.name === '.obsidian') continue;
+    const p = path.join(d, e.name);
+    if (e.isDirectory()) walk(p);
+    else if (e.name.endsWith('.md')) mds.push(p);
+    else if (e.name.endsWith('.base')) bases.push(p);
+  }
+})(root);
+
+// Base files are linked by full filename ("Needs Review.base"); notes by basename.
+const targets = new Set([
+  ...mds.map(p => path.basename(p, '.md')),
+  ...bases.map(p => path.basename(p)),
+]);
+
+// Wikilinks inside fenced or inline code are documentation ABOUT the syntax,
+// not links. Stripping them is what keeps this check honest rather than noisy.
+const strip = t => t.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '');
+
+let issues = 0;
+for (const p of mds) {
+  const raw = fs.readFileSync(p, 'utf8');
+  const rel = path.relative(root, p).split(path.sep).join("/");
+  if (!raw.startsWith('---\n')) { console.log(`  FAIL  ${rel} - no YAML frontmatter`); issues++; continue; }
+  const fm = raw.slice(4, raw.indexOf('\n---', 4));
+  for (const key of ['type:', 'status:', 'created:', 'source:']) {
+    if (!new RegExp('^' + key, 'm').test(fm)) { console.log(`  FAIL  ${rel} - frontmatter missing ${key}`); issues++; }
+  }
+  for (const m of strip(raw).matchAll(/\[\[([^\]|#]+)/g)) {
+    const t = m[1].trim();
+    if (!targets.has(t)) { console.log(`  FAIL  ${rel} - broken wikilink [[${t}]]`); issues++; }
+  }
+}
+const label = issues === 0 ? '  ok  ' : '  FAIL';
+console.log(`${label}  ${mds.length} notes, ${bases.length} bases, ${issues} issue(s)`);
+process.exit(issues === 0 ? 0 : 1);
+NODE
+[ $? -eq 0 ] || fail=$((fail + 1))
+
+# ------------------------------------------------------------ the quarantine ---
+# The single rule that makes automatic capture safe. If a draft ever reaches a
+# retrieval path, the vault stops being trustworthy and the product is dead.
+say ''
+say 'Draft quarantine is enforced in the retrieval path'
+if grep -q 'tl\/draft' "$plugin/bin/tl-brief"; then
+  ok 'tl-brief filters #tl/draft'
+else
+  bad 'tl-brief does not filter #tl/draft'
+fi
+if grep -q 'status == "active"' "$plugin/bin/tl-brief" && grep -q 'status == "open"' "$plugin/bin/tl-brief"; then
+  ok 'tl-brief admits only active decisions and open gotchas'
+else
+  bad 'tl-brief status filtering missing'
+fi
+
+say ''
+if [ "$fail" -eq 0 ]; then
+  say 'All static checks passed.'
+  say 'Dashboard rendering still needs a human: see vault/Throughline/98 Meta/VERIFY.md'
+  exit 0
+fi
+say "$fail check(s) failed."
+exit 1

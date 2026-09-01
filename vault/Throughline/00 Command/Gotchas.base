@@ -1,0 +1,33 @@
+filters:
+  and:
+    - 'type == "gotcha"'
+    - 'status == "open"'
+views:
+  - type: table
+    name: Open gotchas
+    order:
+      - file.name
+      - note.severity
+      - note.cost
+      - note.affects
+      - note.project
+      - note.recurrence
+    sort:
+      - property: note.severity
+        direction: ASC
+      - property: note.cost
+        direction: DESC
+  - type: table
+    name: Recurring — candidates for a Practice
+    filters:
+      and:
+        - 'recurrence >= 2'
+    order:
+      - file.name
+      - note.recurrence
+      - note.severity
+      - note.cost
+      - note.affects
+    sort:
+      - property: note.recurrence
+        direction: DESC

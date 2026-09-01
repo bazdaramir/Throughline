@@ -1,0 +1,132 @@
+#!/bin/sh
+# tl-session-end - Throughline SessionEnd distillation trigger (W1)
+#
+# Reads the hook payload on stdin, applies the skip guards, and - only if the
+# session was substantial - spawns headless Claude Code DETACHED to write the
+# Session note out of band. The user's session ends immediately either way.
+#
+# HARD RULES:
+#   - Never delay session end. The spawn is detached and never waited on.
+#   - Never print an error. A missing session log is a minor loss; a visible
+#     error at session end is an uninstall. Every path exits 0.
+#   - Everything the spawned process writes is source: agent. The Session log is
+#     EVIDENCE and carries no mandatory #tl/draft; any additional KNOWLEDGE note
+#     it emits is quarantined with #tl/draft.
+#   - It may never promote a draft, and never edits an existing knowledge note.
+
+set -u
+
+LOG=""   # set to a path to debug; empty means silent
+
+note() { [ -n "$LOG" ] && printf '%s\n' "$*" >>"$LOG" 2>/dev/null; return 0; }
+
+payload=$(cat 2>/dev/null || true)
+
+jsonval() {
+  printf '%s' "$payload" \
+    | tr ',' '\n' \
+    | grep -m1 "\"$1\"" \
+    | sed 's/.*"'"$1"'"[[:space:]]*:[[:space:]]*"//; s/".*//' \
+    | tr -d '\r'
+}
+
+transcript=$(jsonval transcript_path)
+cwd=$(jsonval cwd)
+[ -n "$cwd" ] && cd "$cwd" 2>/dev/null
+
+# ---------------------------------------------------------------- guards ---
+[ -f ./.throughline ] || { note 'no .throughline'; exit 0; }
+
+proj=$(sed -n 's/^project:[[:space:]]*//p' ./.throughline 2>/dev/null | head -1 | tr -d '\r')
+[ -n "$proj" ] || { note 'no project slug'; exit 0; }
+
+vault="${THROUGHLINE_VAULT:-}"
+if [ -z "$vault" ]; then
+  vault=$(sed -n 's/^vault:[[:space:]]*//p' ./.throughline 2>/dev/null | head -1 | tr -d '\r')
+fi
+[ -n "$vault" ] || vault="$HOME/Throughline"
+case "$vault" in
+  '~/'*) vault="$HOME/${vault#\~/}" ;;
+  '~')   vault="$HOME" ;;
+esac
+[ -d "$vault/01 Projects/$proj/Sessions" ] || { note 'no session partition'; exit 0; }
+
+# Guard 1: fewer than 3 tool calls this session -> not worth distilling.
+calls=0
+if [ -n "$transcript" ] && [ -f "$transcript" ]; then
+  calls=$(grep -c '"type"[[:space:]]*:[[:space:]]*"tool_use"' "$transcript" 2>/dev/null || echo 0)
+fi
+[ "$calls" -ge 3 ] 2>/dev/null || { note "only $calls tool calls - skip"; exit 0; }
+
+# Guard 2: no files modified -> nothing happened worth recording.
+command -v git >/dev/null 2>&1 || { note 'no git'; exit 0; }
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { note 'not a repo'; exit 0; }
+dirty=$(git status --porcelain 2>/dev/null | head -1)
+recent=$(git log --oneline -1 --since='12 hours ago' 2>/dev/null | head -1)
+[ -n "$dirty" ] || [ -n "$recent" ] || { note 'no file changes - skip'; exit 0; }
+
+command -v claude >/dev/null 2>&1 || { note 'claude cli not on PATH'; exit 0; }
+
+# ------------------------------------------------------- the distillation ---
+prompt=$(cat <<EOF
+Write a Throughline Session note for the session that just ended.
+
+Vault:   $vault
+Project: $proj
+Sessions folder: $vault/01 Projects/$proj/Sessions/
+Transcript: $transcript
+
+Follow the template at "$vault/90 Templates/Session.md" exactly - the same five
+'##' headings, in that order: Goal, What happened, What changed, Dead ends, Open threads.
+
+Filename: YYYY-MM-DD-HHMM.md using the session's start time.
+
+Frontmatter, exactly these keys:
+  type: session
+  status: complete
+  project: $proj
+  created / updated: today, YYYY-MM-DD
+  source: agent
+  duration, branch, touched
+Optional when genuinely known: outcome, files_changed, produced, open_threads.
+Never write last_verified.
+
+'Dead ends' is the most valuable section - what was tried and abandoned.
+Successful approaches are visible in the code forever; failed ones leave no
+trace anywhere and are exactly what an agent will re-attempt next Tuesday.
+
+Then, ONLY if genuinely warranted, emit 0-3 additional draft notes (Decision,
+Gotcha, or Component) following their templates in "$vault/90 Templates/".
+
+BE RUTHLESS. Most sessions produce nothing worth keeping beyond the log itself.
+Do not manufacture significance. Silence is the correct default and emitting
+zero extra notes is the common, correct outcome.
+
+Provenance. Every note you write carries 'source: agent', without exception.
+The quarantine tag is applied differently to the two kinds of note:
+
+1. The Session log itself - EVIDENCE, not knowledge.
+   source: agent
+   NO tl/draft tag is required. Do not add one.
+   Session notes are never promoted and never reviewed as knowledge; the vault's
+   own hygiene queue excludes 'type: session' by design.
+
+2. Any ADDITIONAL knowledge note (Decision, Gotcha, Component) - KNOWLEDGE.
+   source: agent
+   tags:
+     - tl/draft
+   These are quarantined and excluded from all retrieval until a human promotes
+   them. This is what makes automatic capture safe.
+
+You may NEVER remove a tl/draft tag, promote a note, rename a note, delete a
+note, or edit any existing knowledge note. Create only.
+EOF
+)
+
+# Detached, backgrounded, fully silenced. The user has already gone.
+(
+  claude -p "$prompt" --allowedTools Read,Write,Bash >/dev/null 2>&1 &
+) >/dev/null 2>&1 &
+
+note 'spawned'
+exit 0

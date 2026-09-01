@@ -1,0 +1,32 @@
+{
+  "name": "throughline",
+  "owner": {
+    "name": "Amirhossein Bazdar"
+  },
+  "metadata": {
+    "description": "Engineering memory for AI-assisted development: an Obsidian hub vault plus a Claude Code plugin that captures decisions and gotchas automatically and retrieves only the relevant slice.",
+    "version": "0.3.0"
+  },
+  "plugins": [
+    {
+      "name": "throughline",
+      "source": "./plugin/throughline",
+      "description": "Captures decisions, gotchas, and session outcomes automatically; retrieves the relevant slice into every session. 12 skills, 2 subagents, 2 hooks, no MCP servers.",
+      "version": "0.3.0",
+      "author": {
+        "name": "Amirhossein Bazdar"
+      },
+      "keywords": [
+        "obsidian",
+        "memory",
+        "context",
+        "adr",
+        "decisions",
+        "knowledge-management",
+        "claude-code"
+      ],
+      "category": "productivity",
+      "strict": false
+    }
+  ]
+}

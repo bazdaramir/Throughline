@@ -1,0 +1,12 @@
+* text=auto
+
+# The hook scripts and the validator run under /bin/sh. Git Bash tolerates CRLF;
+# dash, which is /bin/sh on most Linux distributions, does not - it fails on the
+# trailing \r. Pin these to LF so a clone on any platform gets a runnable script.
+plugin/throughline/bin/* text eol=lf
+tools/tl-validate       text eol=lf
+
+# Markdown notes are the product's content. Keep diffs readable.
+*.md   text
+*.base text
+*.json text

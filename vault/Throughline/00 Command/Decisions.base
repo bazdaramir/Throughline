@@ -1,0 +1,33 @@
+filters:
+  and:
+    - 'type == "decision"'
+views:
+  - type: table
+    name: All decisions
+    order:
+      - file.name
+      - note.status
+      - note.project
+      - note.affects
+      - note.reversal_cost
+      - note.updated
+    sort:
+      - property: note.status
+        direction: ASC
+      - property: note.updated
+        direction: DESC
+  - type: table
+    name: Active only
+    filters:
+      and:
+        - 'status == "active"'
+    order:
+      - file.name
+      - note.project
+      - note.affects
+      - note.reversal_cost
+      - note.confidence
+      - note.last_verified
+    sort:
+      - property: note.last_verified
+        direction: ASC

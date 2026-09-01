@@ -1,0 +1,3 @@
+# Generated context packets are disposable. Keep the folder, drop its contents.
+*
+!.gitignore

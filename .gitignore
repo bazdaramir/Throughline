@@ -1,0 +1,21 @@
+# Throughline — repo-level ignores
+
+# A stray Obsidian workspace appears here if the repo ROOT is ever opened as a
+# vault by mistake. The real vault is vault/Throughline; this one is noise.
+/.obsidian/
+
+# Obsidian per-machine state. The rest of vault/Throughline/.obsidian/ IS
+# shipped, deliberately: it is what makes the vault open pre-configured with
+# Bases and Templates already on.
+vault/Throughline/.obsidian/workspace.json
+vault/Throughline/.obsidian/workspace-mobile.json
+vault/Throughline/.obsidian/graph.json
+
+# Generated context packets are derived artefacts, never permanent knowledge (§11.3).
+vault/Throughline/04 Briefs/*
+!vault/Throughline/04 Briefs/.gitignore
+
+# OS noise
+.DS_Store
+Thumbs.db
+desktop.ini

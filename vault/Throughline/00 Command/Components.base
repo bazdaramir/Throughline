@@ -1,0 +1,31 @@
+filters:
+  and:
+    - 'type == "component"'
+views:
+  - type: cards
+    name: Component map
+    order:
+      - file.name
+      - note.project
+      - note.stability
+      - note.paths
+    sort:
+      - property: note.project
+        direction: ASC
+      - property: file.name
+        direction: ASC
+  - type: table
+    name: Table
+    order:
+      - file.name
+      - note.project
+      - note.status
+      - note.stability
+      - note.parent
+      - note.paths
+      - note.last_verified
+    sort:
+      - property: note.project
+        direction: ASC
+      - property: file.name
+        direction: ASC

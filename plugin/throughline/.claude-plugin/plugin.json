@@ -1,0 +1,18 @@
+{
+  "name": "throughline",
+  "description": "Engineering memory for AI-assisted development. Captures decisions, gotchas, and session outcomes automatically; retrieves the relevant slice into every session.",
+  "version": "0.3.0",
+  "author": {
+    "name": "Amirhossein Bazdar"
+  },
+  "license": "Commercial",
+  "keywords": [
+    "obsidian",
+    "memory",
+    "context",
+    "adr",
+    "decisions",
+    "knowledge-management",
+    "claude-code"
+  ]
+}
