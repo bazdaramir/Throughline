@@ -342,45 +342,45 @@ Future work, in rough order of expected value. None of it is started.
   automatically rather than by hand.
 - **Multi-machine vault sync**, which today is whatever the user already uses for the folder.
 
-## Project leadership & AI-assisted engineering
+## Authorship
 
-**Amirhossein Bazdar** — *Project Lead · AI-Assisted Development Manager · Product & UI/UX Direction*
+**Amirhossein Bazdar** — *Project Lead · AI-Assisted Development*
 
-Amirhossein Bazdar led this project from initial ideation through prototype, defining the product
-direction, requirements, overall system structure, initial UI/UX concepts, and development
-priorities. He also designed and managed the AI-assisted engineering workflow in which Claude was
-used as an engineering collaborator under human direction: breaking requirements into implementation
-tasks, reviewing generated changes, validating system behaviour, identifying defects and
-inconsistencies, enforcing architectural boundaries, and iteratively refining the product.
+Throughline was developed by one person using AI coding agents — primarily Claude Code — as
+development tools. The product direction, system structure, and engineering decisions are human.
+Most of the implementation was written by an agent working against written requirements, then
+reviewed, tested, and corrected before it was accepted.
 
-His contribution covers:
+What that covered:
 
-- original project ideation and product definition
-- requirements, feature definition, and prioritisation
-- overall system structure and architectural direction
-- the vault's information architecture, initial UI/UX concepts, and visual design direction
-- phased development planning and scope management
-- orchestration of AI coding agents, and review of everything they produced
-- debugging, validation, and regression testing against the specification
-- final product direction
+- the original idea, and the product definition it became
+- requirements, constraints, and what the system deliberately does *not* do
+- the overall structure — four layers, and the boundaries between them
+- the vault's information architecture and UI/UX direction: 7 note types, 7 templates, the Bases
+  dashboards, and the reading path a new user is walked through
+- breaking the work into phases, and each phase into concrete implementation tasks
+- writing those tasks up for the coding agent, then reviewing and testing what came back
+- validating behaviour against the specification, and finding the defects, inconsistencies, and
+  deviations from it
+- scope and architecture calls: what ships, what is deferred, what is rejected outright
 
-### How the work was actually done
+### How the work was done
 
-The claim worth making is not "Claude wrote code." It is that the work was **directed** — and the
-repository carries the evidence.
+The loop below is the working pattern, not an idealised one. The decisions it produced are visible
+in the repository.
 
 ```mermaid
 flowchart LR
-    A["Human defines<br/>problem, constraints, scope"] --> B["Decompose into<br/>phased requirements"]
-    B --> C["Claude implements<br/>against a written contract"]
-    C --> D["Human review:<br/>inspect · test · validate"]
-    D -->|"defect or<br/>boundary violation"| E["Reject, correct,<br/>record the deviation"]
+    A["Human: define problem,<br/>constraints, scope"] --> B["Human: plan phases,<br/>decompose into tasks"]
+    B --> C["AI coding agent:<br/>implement or investigate"]
+    C --> D["Human: review, test,<br/>validate against spec"]
+    D -->|"defect, or drift<br/>from the spec"| E["Human: decide —<br/>reject, revise, record"]
     E --> C
     D -->|"accepted"| F["Phase gate<br/>+ changelog entry"]
     F --> B
 ```
 
-The human-owned decisions, and where you can see each one:
+Decisions made by hand, and where the repository shows each one:
 
 | Decision | Evidence in the repository |
 |---|---|
