@@ -59,7 +59,10 @@ Run all eight. Report each by number, even when clean.
    the Components in `affects`.
 3. **Undeclared supersession.** Decisions that appear superseded in practice — a later active
    Decision covering the same ground — but whose `status` is still `active` with no
-   `superseded_by`.
+   `superseded_by`. The certain case comes first: a promoted Decision whose `supersedes` names a
+   Decision still marked `active` is a supersession nobody completed at promotion. A *draft* whose
+   `supersedes` names an active Decision is not a finding — that is the supersession waiting for
+   review, exactly as designed.
 4. **Expired gotchas.** Gotchas whose `expires` date has passed and whose `status` is still `open`.
 5. **Practice candidates.** Gotchas with `recurrence >= 2`. A landmine stepped on twice is not a
    landmine, it is a missing convention.
@@ -78,6 +81,12 @@ Run all eight. Report each by number, even when clean.
   finding concerns an unpromoted draft, since the fix is usually "promote or delete" rather than
   "repair".
 - Use `git` read-only. Never run a command that writes to the repository.
+- **Bash is your only way to write, so the boundary is yours to hold.** Write the Audit Log with a
+  single append redirect (`>>`). Never truncate or rewrite it, and never run anything that modifies
+  any other file — no `sed -i`, `mv`, `rm`, `cp` onto a note, or `>` into the vault.
+- Frontmatter lists come in two shapes — `affects: ["[[C-0002 Session store]]"]` and a block list
+  with one `- "[[...]]"` per line, which is what Obsidian writes. Read both; a note is not orphaned
+  or unlinked because its links are on separate lines.
 
 ## Be conservative
 
@@ -129,7 +138,8 @@ source: agent
 # Audit Log
 
 Append-only record of `/throughline:audit` runs. **The auditor flags; it never modifies a knowledge
-note.** Work the findings through `00 Command/Needs Review.base`.
+note** — it applies no tags either, so its findings appear here, not in `00 Command/Needs Review.base`.
+Tag a note `#tl/needs-review` yourself to put it in that queue.
 ```
 
 ## Constraints

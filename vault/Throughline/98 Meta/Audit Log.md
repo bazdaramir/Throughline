@@ -15,7 +15,7 @@ Append-only record of `/throughline:audit` runs.
 codebase, writes its findings here, and stops. Nothing is tagged, edited, promoted, renamed, or
 deleted on your behalf — you decide what each finding means.
 
-Work the findings through [[Needs Review.base|Needs Review]].
+Because the auditor applies no tags, its findings live here and do not appear in [[Needs Review.base|Needs Review]] on their own. To track one in the queue, tag the note `#tl/needs-review` yourself.
 
 > [!info] Why this file is append-only
 > An audit is a dated observation about a moment in time. Rewriting it would destroy the record of

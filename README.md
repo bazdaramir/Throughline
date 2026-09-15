@@ -47,11 +47,11 @@ Decisions and Gotchas governing them. Pure path matching in `sh` and `awk`. That
 instant, free, and *structurally incapable of inventing a decision you never made.* A
 model-generated brief cannot make that promise.
 
-**The draft quarantine is what makes automatic capture safe.** Every note written by automation
-carries `source: agent` and a `#tl/draft` tag, and drafts are excluded from every retrieval path. No
-skill, hook, or subagent may remove that tag — promotion is a human action, without exception.
-Without this rule, auto-capture poisons the vault within a month, and a memory you cannot trust is
-worse than no memory at all.
+**The draft quarantine is what makes automatic capture safe.** Every knowledge note written by
+automation carries `source: agent` and a `#tl/draft` tag, and drafts are excluded from every
+retrieval path. No skill, hook, or subagent may remove that tag — promotion is a human action,
+without exception. Without this rule, auto-capture poisons the vault within a month, and a memory
+you cannot trust is worse than no memory at all.
 
 **The auditor flags and never modifies.** It reads the vault against the real codebase and writes
 findings to an append-only log. It does not tag, edit, promote, rename, or delete a knowledge note.
@@ -94,9 +94,10 @@ flowchart TD
         WK["/week — the one ritual"]
     end
 
-    SE --> Q
+    SE -->|"decisions, gotchas"| Q
+    SE -->|"session log — evidence"| V
     BF --> Q
-    SK --> V
+    SK --> Q
     Q -.->|"human promotion only"| V
     V --> TB
     V --> BR
@@ -129,10 +130,17 @@ matches, it prints nothing. Every failure path exits 0, so the hook can never bl
 file changes, means nothing worth recording — and otherwise spawns headless Claude Code *detached*
 to write a Session note out of band. Your session ends immediately either way. The Session log is
 evidence, so it carries `source: agent` but no draft tag; any additional Decision or Gotcha it emits
-is knowledge, so it is quarantined.
+is knowledge, so it is quarantined. The distiller is itself a Claude Code session, so it runs with
+`THROUGHLINE_DISTILLING` set and both hooks stand down inside it — otherwise its own session end
+would start another distillation, indefinitely. It also gets no shell: it reads a transcript that may
+contain anything, with nobody watching, so the hook gathers the git facts and hands them over.
 
-**Once a week.** Open `Needs Review`, promote the drafts worth keeping, drop the rest. That is the
-entire maintenance burden. One ritual is sustainable; five are not.
+**Once a week.** Run `/throughline:week` for a keep-or-drop call on every draft, then open
+`Needs Review` in Obsidian and act on it. Promoting a draft is a handful of property edits — remove
+`tl/draft`, set `last_verified`, and complete any supersession it proposes — listed in
+[How Throughline Works](vault/Throughline/98%20Meta/How%20Throughline%20Works.md#promoting-a-draft).
+Dropping one is deleting it. That is the entire maintenance burden. One ritual is sustainable; five
+are not.
 
 ## Key features
 
@@ -168,7 +176,7 @@ vault/Throughline/                the hub vault — one vault, all projects, one
   04 Briefs/                      generated context packets — derived, gitignored
   90 Templates/                   the 7 note templates
   98 Meta/                        how it works, note reference, changelog, audit log, VERIFY
-tools/tl-validate                 static validation gate for the whole repository
+tools/tl-validate                 validation gate: static contracts plus hook behaviour
 docs/  starter/  lite/            reserved and empty — see Current status
 ```
 
@@ -194,31 +202,40 @@ claude plugin marketplace add ./
 claude plugin install throughline@throughline
 ```
 
-**3 · Tell Throughline where the vault is.** Vault resolution goes `$THROUGHLINE_VAULT` → the
-`vault:` line in the repo's `.throughline` → `~/Throughline`. On a fresh clone the vault sits inside
-the repository rather than at the fallback path, so set the variable once, in your shell profile:
+**3 · Point a repository at the vault.** Vault resolution goes `$THROUGHLINE_VAULT` → the `vault:`
+line in the repo's `.throughline` → `~/Throughline`. On a fresh clone the vault sits inside the
+repository rather than at the fallback path, so name it once. In any project you want tracked, start
+Claude Code and run:
+
+```
+/throughline:init --vault /absolute/path/to/Throughline/vault/Throughline
+```
+
+That writes a `.throughline` pointer file in the repo root, with an explicit `vault:` line that both
+hooks read, and creates the project's partition in the vault. After the first repository you can
+drop `--vault` by exporting the variable instead:
 
 ```bash
 export THROUGHLINE_VAULT="/absolute/path/to/Throughline/vault/Throughline"
 ```
 
-Skip this only if you move or symlink `vault/Throughline` to `~/Throughline`. Without one of the
-two, `/throughline:init` reports that no vault was found, and the SessionStart hook stays silent —
-by design, since it can never block a session.
+Set it where Claude Code will actually see it. On Windows, a variable exported in `~/.bashrc` is not
+visible to Claude Code started from PowerShell or the desktop app — use `setx THROUGHLINE_VAULT ...`
+and restart Claude Code, or keep passing `--vault`. A vault that does not resolve makes the
+SessionStart hook silent, by design, since it can never block a session.
 
-**4 · Point a repository at the vault.** In any project you want tracked, start Claude Code and run:
-
-```
-/throughline:init
-```
-
-That writes a `.throughline` pointer file in the repo root, with an explicit `vault:` line, and
-creates the project's partition in the vault. Then map your main source directory, which is what the
-whole retrieval layer joins against:
+**4 · Map, then promote.** Map your main source directory, which is what the whole retrieval layer
+joins against:
 
 ```
 /throughline:map src/
 ```
+
+The Component note it writes is a quarantined draft, like every knowledge note Throughline writes,
+and every Decision and Gotcha reaches the brief *through* a Component. So the brief stays silent
+until you open that note in Obsidian, check its `paths` and invariants, remove `tl/draft`, and set
+`last_verified` — the promotion steps in
+[How Throughline Works](vault/Throughline/98%20Meta/How%20Throughline%20Works.md#promoting-a-draft).
 
 The vault is fully usable without the plugin — open `90 Templates/` and write a note by hand. The
 plugin only removes the typing.
@@ -254,38 +271,78 @@ What is *absent* is the more interesting half:
   quarantine doing its job.
 - **D-0003** and **G-0002** govern the billing component, which this branch never touched.
 
+## Troubleshooting
+
+Both hooks are silent by design — a hook that complains at you gets uninstalled — so when nothing
+happens, ask the scripts directly.
+
+**The SessionStart brief never appears.** From the root of your project, run it by hand:
+
+```bash
+sh /absolute/path/to/Throughline/plugin/throughline/bin/tl-brief
+```
+
+No output means one of these, most likely first:
+
+- no *promoted* Component has a `paths` entry that prefixes a changed file. Drafts are invisible to
+  retrieval, and entries are repo-relative prefixes such as `src/auth/` — never globs.
+- nothing changed: the brief reads the working tree and the last three commits.
+- the vault does not resolve: check `$THROUGHLINE_VAULT` as Claude Code sees it, then the `vault:`
+  line in `.throughline`.
+- Claude Code was started in a directory other than the one holding `.throughline`.
+
+**No Session note appears after a session.** Distillation is skipped for sessions with fewer than
+three tool calls or no file changes, and needs `claude` on `PATH`. Set `THROUGHLINE_LOG` to a file
+path in the environment Claude Code starts from: the hook then records why it skipped, and when it
+does spawn, the distiller's own output — an expired login, for instance.
+
 ## Validation
 
 Separated by kind, because the kinds are not equally strong.
 
-**Static checks — automated and reproducible.**
+**Automated — one command, reproducible.**
 
 ```bash
 sh tools/tl-validate
 ```
 
-It parses both hook scripts with `sh -n`, validates all three JSON manifests, asserts the plugin
-inventory (12 skills / 2 subagents / 2 hooks / 0 MCP servers), checks that every skill declares
-`name` and `description`, parses the frontmatter of all 32 vault notes, resolves every wikilink
-against the 32 notes and 7 base files — ignoring wikilinks inside code spans, which are
-documentation *about* the syntax — and greps the retrieval path to confirm the draft quarantine is
-still enforced. It exits non-zero on failure; that path was exercised by injecting a broken wikilink
-and confirming the non-zero exit, then reverting.
+It needs `sh`, `awk`, `git`, and `node`, runs every check, and exits non-zero if any failed.
+
+- *Plugin shape.* Parses both hook scripts with `sh -n`, validates the three JSON manifests, asserts
+  the inventory (12 skills / 2 subagents / 2 hooks / 0 MCP servers), and checks that every skill
+  declares `name` and `description`.
+- *Vault contracts.* Every note under `vault/Throughline` — the 32 shipped notes and any you add —
+  needs the six universal properties, a known `type`, a `status` valid for that type, a `source` of
+  `human`, `agent`, or `backfill`, the properties its type requires, and a folder matching its type
+  and project. Every `affects` must name a Component in the same project, every completed
+  supersession must be recorded on both notes, every wikilink must resolve — including the
+  `#View name` of an embedded `.base` — and no `tl/` tag may fall outside the eleven. Wikilinks and
+  tags inside code are documentation *about* the syntax and are ignored, as Obsidian ignores them.
+- *Hook behaviour.* The real `bin/tl-brief` runs against a disposable git repository wired to a copy
+  of the example vault, and its output must match the example above character for character — so
+  this README cannot drift from the script. The same draft is then tagged as a flow list, a quoted
+  item, and an inline body tag, and must stay out every time; a control run without the tag must
+  bring it back, which proves the tag is what excluded it. Rewriting every list the way Obsidian's
+  Properties panel does, or converting every note to CRLF with a byte-order mark, must not change a
+  character. Outside a Throughline repository the brief must be silent. Finally
+  `bin/tl-session-end` runs with a stub standing in for the `claude` CLI — no model is ever called —
+  and one session end must spawn exactly one distiller, with no shell.
+
+Every check was made to fail before it was trusted. Against the original hook scripts the validator
+reports the three quarantine leaks, the dropped block lists, the CRLF failure, the runaway
+distillation, and the shell. Injected vault defects — a misnamed view, a misspelt tag, an invalid
+status, a misfiled note, a non-Component `affects`, a draft successor, an unfinished supersession,
+an empty `paths`, an invalid `source`, a project that does not match its folder — are each reported.
 
 **Manifest validation — first-party tooling.** `claude plugin validate .` and
 `claude plugin validate plugin/throughline` both pass. `claude plugin details throughline` reports
 the inventory independently: 12 skills, 2 agents, 2 hooks, 0 MCP servers, 0 LSP servers.
 
-**Behavioural testing — disposable repository.** `bin/tl-brief` was run against a throwaway git repo
-wired to the example project. Verified: the correct decisions and gotchas are selected by path
-match; superseded decisions are excluded; `#tl/draft` notes are excluded even when they affect a
-matched component; unrelated components are excluded; `open_threads` is read from the
-branch-matching session and the session body never is. The guard paths — no `.throughline`, not a
-git repository, clean working tree — each exit 0 silently, as specified.
-
-`bin/tl-session-end` was exercised on its guard paths; a transcript below the tool-call threshold is
-correctly skipped. Live end-to-end distillation was verified during Phase 3 development across three
-runs, recorded in the [vault changelog](vault/Throughline/98%20Meta/Vault%20Changelog.md) v0.1.4.
+**Live distillation.** A real headless session writing a real Session note was verified during
+Phase 3 development across three runs, recorded in the
+[vault changelog](vault/Throughline/98%20Meta/Vault%20Changelog.md) v0.1.4. The later changes to how
+the distiller is launched — the guard variable, and git facts in place of a shell — are covered by
+the stub test above but have not yet been re-run against a live model.
 
 **Known limitations of this validation.**
 
@@ -298,8 +355,11 @@ runs, recorded in the [vault changelog](vault/Throughline/98%20Meta/Vault%20Chan
   the constraints written into each `SKILL.md`; there is no automated test that a model honours
   them. They have been exercised interactively, not systematically.
 - **There is no test suite in the conventional sense** — no unit tests, no CI. `tools/tl-validate`
-  is a static gate, not a substitute for one.
-- **Tested on one machine:** Windows 11 with Git Bash, Obsidian 1.13.7.
+  exercises the hooks end to end on one fixture; it is a gate, not a substitute for a suite.
+- **Tested on one machine:** Windows 11 with Git Bash, Obsidian 1.13.7. The CRLF check forces gawk
+  into binary mode so that it reads files the way Linux and macOS awks do, the brief's parser was
+  also run under `gawk --posix`, and the whole gate — both hooks included — passes under `dash`,
+  the `/bin/sh` of Debian and Ubuntu. But no other operating system has run the scripts.
 
 ## Current status
 
@@ -310,7 +370,7 @@ Prototype. Phases 1–3 are complete and the system runs end to end.
 - The vault: 7 note types, 7 templates, 7 Bases dashboards, hub notes, and a worked example
 - The plugin: 12 skills, 2 subagents, 2 hooks, and both hook scripts
 - Marketplace manifest — installable, and verified locally
-- `tools/tl-validate` static gate
+- `tools/tl-validate` — static contracts plus hook behaviour on a disposable fixture
 
 **Deliberately deferred**
 
@@ -340,6 +400,9 @@ Future work, in rough order of expected value. None of it is started.
   it.
 - **Cross-project practice extraction** — recurring gotchas graduating into shared Practices
   automatically rather than by hand.
+- **Validating any vault.** `tools/tl-validate` checks the vault inside this repository. The same
+  contract checks pointed at a user's own vault would catch a hand edit that silently takes a note
+  out of retrieval — a misfiled Gotcha, an unknown status — before the missing brief does.
 - **Multi-machine vault sync**, which today is whatever the user already uses for the folder.
 
 ## Authorship

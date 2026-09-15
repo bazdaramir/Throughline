@@ -7,6 +7,10 @@ plugin/throughline/bin/* text eol=lf
 tools/tl-validate       text eol=lf
 
 # Markdown notes are the product's content. Keep diffs readable.
-*.md   text
-*.base text
+# Notes and dashboards are pinned to LF: with core.autocrlf=true - the Git for
+# Windows default - a fresh clone otherwise gets CRLF notes. The hook scripts
+# and the validator now tolerate that, but a vault that is byte-identical on
+# every platform is one less thing for any other tool to get wrong.
+*.md   text eol=lf
+*.base text eol=lf
 *.json text

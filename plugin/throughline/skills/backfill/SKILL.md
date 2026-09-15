@@ -38,8 +38,8 @@ real code. Everything about how it behaves shapes whether they trust the system.
 ## Output contract
 
 Live progress while it runs, then the notes created grouped by type, then the honest confidence
-summary. Target is **10–20 notes on a 100+ commit repo** — fewer means thresholds were too strict,
-more than 25 means it generated noise.
+summary. Target is **10–20 notes on a 100+ commit repo**. More than 25 means it generated noise;
+fewer is a legitimate result when the history does not support more, and the backfiller says why.
 
 Everything it writes carries:
 

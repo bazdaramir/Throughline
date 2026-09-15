@@ -20,10 +20,11 @@ A question is required. With no argument, ask what they want to know.
 
 ## Retrieval rules — binding
 
-- **Read only promoted notes. Skip every note tagged `#tl/draft`.** Drafts are unreviewed agent
-  output; surfacing one as established reasoning is exactly the failure the quarantine exists to
-  prevent. If a draft *would* have answered the question, say that a draft exists and needs
-  promoting — but do not quote its content as fact.
+- **Read only promoted notes. Skip every note tagged `#tl/draft`** — in frontmatter `tags` in any
+  form, or inline in the body outside code. Drafts are unreviewed agent output; surfacing one as
+  established reasoning is exactly the failure the quarantine exists to prevent. If a draft *would*
+  have answered the question, say that a draft exists and needs promoting — but do not quote its
+  content as fact.
 - Search `Decisions/` for the current project. Widen to other projects only if the question is
   explicitly cross-project, and label anything from another project clearly.
 - Practices in `03 Practices/` are in scope when the question is about a convention rather than a
@@ -42,11 +43,15 @@ A question is required. With no argument, ask what they want to know.
      following. Do not recurse.
    - `superseded_by` points at a note that does not exist → report the broken link; treat the note
      as current but say the chain is damaged.
-   - **`superseded_by` points at a note that is still `#tl/draft`** → the chain's promoted end is the
-     last *promoted* note. Report that one as current, then **disclose that an unpromoted draft
-     claims to supersede it** — name it and say it needs review. Do not quote its content as fact.
-     Both halves matter: saying a decision is current while an unreviewed reversal of it sits in the
-     queue is misleading, and quoting the draft as settled would break the quarantine.
+   - **An unpromoted draft claims to supersede it** — a `#tl/draft` Decision whose `supersedes` names
+     this note, or a `superseded_by` that points at a draft → the chain's promoted end is the last
+     *promoted* note. Report that one as current, then **disclose that an unpromoted draft proposes
+     to replace it** — name it and say it needs review. Do not quote its content as fact. Both halves
+     matter: saying a decision is current while an unreviewed reversal of it sits in the queue is
+     misleading, and quoting the draft as settled would break the quarantine.
+   - **A promoted Decision's `supersedes` names a note still marked `active`** → the supersession was
+     never completed at promotion. Report the newer promoted Decision as current, and say the older
+     one still needs `status: superseded` and `superseded_by` set by hand.
 
 3. **Classify what you found, and say which:**
    - **Answered** — a decision directly addresses the question.

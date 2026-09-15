@@ -33,15 +33,17 @@ claude plugin marketplace add ./
 claude plugin install throughline@throughline
 ```
 
-Then point Throughline at the vault — resolution is `$THROUGHLINE_VAULT` → the `vault:` line in a
-repo's `.throughline` → `~/Throughline`, and the vault lives inside this repository rather than at
-the fallback:
+Then, inside any repository you want tracked, point it at the vault — which lives inside this
+repository rather than at the `~/Throughline` fallback:
 
-```bash
-export THROUGHLINE_VAULT="/absolute/path/to/Throughline/vault/Throughline"
+```
+/throughline:init --vault /absolute/path/to/Throughline/vault/Throughline
 ```
 
-Now run `/throughline:init` inside any repository you want tracked.
+That records the path in the repo's `.throughline`, where both hooks read it. Exporting
+`THROUGHLINE_VAULT` works too, as long as Claude Code starts from a shell that has it. Every
+knowledge note Throughline captures arrives as a draft; promoting one is a few property edits, listed
+in `98 Meta/How Throughline Works.md`.
 
 The vault works without the plugin — open `90 Templates/` and write a note by hand. The plugin only
 removes the typing.

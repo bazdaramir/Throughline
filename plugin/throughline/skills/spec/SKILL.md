@@ -23,8 +23,9 @@ An objective is required.
 `spec` is a capture skill, but `Constraints` and `Known landmines` are *retrieval*. The retrieval
 rules therefore bind here too:
 
-- **Exclude every `#tl/draft` note.** A spec grounded in unpromoted guesses is worse than an
-  ungrounded one, because it looks authoritative.
+- **Exclude every `#tl/draft` note** — `tl/draft` in frontmatter `tags` in any form, or inline in
+  the body outside code. A spec grounded in unpromoted guesses is worse than an ungrounded one,
+  because it looks authoritative.
 - Only `status: active` Decisions and `status: open` Gotchas.
 - **Quote the source notes; do not paraphrase.** A paraphrased constraint loses the precision that
   made it worth recording, and the reader cannot tell what was actually decided.

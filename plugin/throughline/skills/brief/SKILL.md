@@ -27,7 +27,9 @@ An area query is required — a Component name, a path, or a concept.
   would hurt most if this agent did not know it goes first. An `irreversible` decision outranks an
   interesting one.
 - **Exclude every note tagged `#tl/draft`.** Unreviewed agent output must never enter a working
-  context as established fact.
+  context as established fact. A note is a draft when `tl/draft` is in its frontmatter `tags` in any
+  form (`- tl/draft`, `- "tl/draft"`, `[tl/draft]`) or appears as `#tl/draft` in its body outside
+  code — the same test the SessionStart brief applies.
 - **Only `status: active` Decisions and `status: open` Gotchas.** Superseded and resolved notes are
   history; they belong to `/throughline:why`, not here.
 - **Never include Session note bodies.** Read only `open_threads` from the most recent Session on

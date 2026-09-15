@@ -15,7 +15,7 @@ tags:
 ---
 
 > [!question] `#tl/draft` — auto-captured, not yet confirmed by a human
-> This note was written by an agent at the end of a session. **It is excluded from every retrieval path** — the SessionStart brief will not mention it, `/throughline:brief` will not include it, and no skill may promote it. A human removes the `tl/draft` tag after a ten-second read, or deletes the note.
+> This note was written by an agent at the end of a session. **It is excluded from every retrieval path** — the SessionStart brief will not mention it, `/throughline:brief` will not include it, and no skill may promote it. A human promotes it after a short read — removing the `tl/draft` tag and setting `last_verified` — or deletes the note.
 >
 > This quarantine is the mechanism that makes automatic capture safe. Without it, auto-capture poisons the vault within a month.
 

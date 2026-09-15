@@ -9,7 +9,7 @@ affects: ["[[C-0003 Billing webhook receiver]]"]
 severity: critical
 cost: "5h"
 external: "Stripe API 2026-04-01"
-expires: 2026-07-01
+expires: 2026-08-01
 last_verified: 2026-07-02
 tags:
   - tl/painful
@@ -17,7 +17,7 @@ tags:
 ---
 
 > [!warning] `expires` is in the past
-> This note claimed the upstream fix would land by 2026-07-01. It did not. Throughline surfaces expired notes in the hygiene queue rather than letting a stale prediction sit in the vault looking authoritative. **Either move the date or drop the field — but decide.**
+> This note claimed the upstream fix would land by 2026-08-01. It did not. Throughline surfaces expired notes in the hygiene queue rather than letting a stale prediction sit in the vault looking authoritative. **Either move the date or drop the field — but decide.**
 
 ## Symptom
 

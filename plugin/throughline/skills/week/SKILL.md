@@ -30,8 +30,16 @@ Window: last 7 days, or `--since`.
    into a ten-second decision, and it is the difference between a queue that gets cleared and one
    that grows. Judge on: does this say something a future session would be worse off not knowing?
 
-3. **What the auditor flagged.** Notes tagged `#tl/needs-review`, plus anything now past its
-   `expires`, plus active Decisions whose `last_verified` is more than 90 days old.
+   A "keep" is only complete with what promotion also involves. If the draft `supersedes` a
+   Decision, say that promoting it means marking that one superseded. If its `affects` names a
+   Component that is itself still a draft, say to promote the Component first — retrieval reaches a
+   Decision or Gotcha only through a promoted Component.
+
+3. **What needs a human look.** Notes tagged `#tl/needs-review`, anything now past its `expires`,
+   active Decisions whose `last_verified` is more than 90 days old, and promoted Decisions whose
+   `supersedes` names a Decision still marked `active` — a supersession nobody completed. For the
+   auditor's own findings, read the newest entries in `98 Meta/Audit Log.md`; the auditor never tags
+   notes, so its findings do not appear in Needs Review on their own.
 
 4. **The git-vs-notes gap — the most useful part.** Compare git activity in the window against notes
    created:
@@ -65,7 +73,7 @@ Written between the markers, and summarised in the conversation:
 
 **Flagged**
 - [[C-0003 ...]] — `paths` no longer matches the code
-- [[G-0002 ...]] — expired 2026-07-01, still open
+- [[G-0002 ...]] — expired 2026-08-01, still open
 
 **Work that produced no knowledge**
 - `src/billing/` — 14 commits, no notes. Worth a look.
@@ -75,7 +83,8 @@ Keep the whole thing **under a ten-minute read.** If a section is empty, say so 
 than padding. A quiet week is a legitimate result and should read as one — do not manufacture
 content to fill the template.
 
-Close by pointing at `00 Command/Needs Review.base`, which is where the promotions actually happen.
+Close by pointing at `00 Command/Needs Review.base`, which is where the promotions actually happen,
+and at the promotion checklist in `98 Meta/How Throughline Works.md`.
 
 ## Constraints
 

@@ -23,10 +23,15 @@ Never invent a slug.
 
 ## Steps
 
-1. **Check for overlap first.** Read every `<vault>/01 Projects/<slug>/Components/*.md` and collect
-   their `paths`. If an existing Component already covers the target, **stop** — report which one,
-   and offer to refine that note by hand. Never write a second Component over the same ground, and
-   never edit the existing one.
+1. **Check for overlap first.** Read every `<vault>/01 Projects/<slug>/Components/*.md` — drafts
+   included — and collect their `paths`. Then compare:
+   - **Same ground** — an existing Component already lists the target itself, or the specific files
+     and directories you would list → **stop**. Report which one, and offer to refine that note by
+     hand. Never write a second Component over the same ground, and never edit the existing one.
+   - **Strictly inside** — the target sits beneath a directory an existing Component owns and is a
+     genuinely distinct subsystem within it → continue; it is a child, and step 4 sets `parent`.
+     `C-0002 Session store` inside `C-0001 Auth subsystem`'s `src/auth/` is the shipped example.
+     If it is not genuinely distinct, it is the same ground — stop.
 
 2. **Read the target.** Directory tree, then the files themselves — entry points, exports, imports,
    types, tests. Follow imports outward far enough to describe what calls this and what it calls.
@@ -37,10 +42,14 @@ Never invent a slug.
      match every Component and destroys retrieval for the whole project.
    - Before writing, check: *would a change to any file under these paths genuinely be a change to
      this component?* If not, narrow it.
-   - Directories end with `/`. Files carry their extension.
+   - Directories end with `/`. Files carry their extension. Paths are repo-relative, as `git status`
+     prints them — no leading `./` or `/`.
+   - **Entries are prefixes, never globs.** The brief matches a changed file when it starts with an
+     entry, so `src/auth/` covers everything beneath it and `src/auth/**/*.ts` matches nothing. If the
+     user named a glob, list the directories and files it resolves to.
 
-4. **Place it in the hierarchy.** If an existing Component's `paths` is a strict prefix of this
-   one's, set `parent` to it. Otherwise omit `parent`.
+4. **Place it in the hierarchy.** If an existing Component owns a directory that this one's `paths`
+   sit strictly inside, set `parent` to it. Otherwise omit `parent`.
 
 5. **Allocate the ID** — scan `Components/` for the highest `C-NNNN`, add one, zero-pad to four.
    Never reuse an ID, even if a note was deleted. Filename: `C-NNNN <Noun phrase>.md`. The title is
@@ -85,7 +94,9 @@ Sections, in this exact order:
 
 Report: the ID, the path, the `paths` value you chose, and the invariants — surfaced explicitly for
 correction, because **the user's correction of the invariants is the value being captured.** Close
-by noting the note is `#tl/draft` and invisible to retrieval until promoted.
+by noting the note is `#tl/draft` and invisible to retrieval until promoted — and that because every
+Decision and Gotcha reaches the brief *through* a Component, nothing attached to this one will
+either, until it is promoted.
 
 ## Constraints
 

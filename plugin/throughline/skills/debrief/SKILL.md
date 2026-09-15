@@ -53,8 +53,13 @@ plans almost never do — and the deviation is usually where the real reasoning 
 
 Zero to three notes. More than three from one change almost always means the bar slipped.
 
-Every note: correct template, correct section order, `source: agent`, `tags: [tl/draft]`, resolved
-`affects`, and **never** `last_verified`.
+Every note: correct template, correct section order, `source: agent`, resolved `affects`, **never**
+`last_verified`, and the quarantine tag written exactly as every other skill writes it:
+
+```yaml
+tags:
+  - tl/draft
+```
 
 Report as a short list — for each: the type, the ID, the path, and one line on why it met the bar.
 If a deviation from the spec drove it, say which. Then the quarantine notice.
@@ -66,6 +71,9 @@ If nothing met the bar, say exactly that in one sentence and stop.
 - **Never modify the Spec.** Do not set it to `done`, do not edit its sections. Whether the work is
   finished is a human judgement.
 - **Never edit a Component to add an invariant.** Propose it in the output; the user applies it.
+- **The only existing note you may touch is a duplicate Gotcha**, and only its `recurrence` and
+  `updated`. A Decision that replaces an earlier one follows `decide`: set `supersedes` on the new
+  draft and leave the predecessor alone.
 - Never remove a `tl/draft` tag.
 - Never write more than one note about the same fact — check existing notes for duplicates first,
   and for a repeated Gotcha symptom increment `recurrence` rather than duplicating.

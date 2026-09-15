@@ -42,10 +42,12 @@ everything deserves a note, and a vault full of trivia is worse than a small one
    intersects yours.
    - **Same choice already recorded and still current** → do not write a duplicate. Report the
      existing note and stop.
-   - **This reverses or replaces an earlier decision** → this is a supersession. Set `supersedes` on
-     the new note, and on the predecessor set `status: superseded` and
-     `superseded_by: "[[D-NNNN <its title>]]"`. **Change nothing else on the predecessor** — not its
-     body, not its `updated`, not its reasoning. It is a historical record.
+   - **This reverses or replaces an earlier decision** → this is a supersession. Set
+     `supersedes: "[[D-NNNN <predecessor title>]]"` on the new note and **leave the predecessor
+     untouched.** The new note is a quarantined draft, so until a human promotes it the predecessor
+     is still the decision in force — and still the one the brief shows. Marking it superseded now
+     would take a promoted decision out of retrieval on the strength of an unreviewed one, and leave
+     it wrongly superseded if the draft is dropped. The human completes the supersession at promotion.
    - **Two or more plausible predecessors** → this is the one time you may ask a question. Ask which.
 
 4. **Allocate the ID** — highest `D-NNNN` in `Decisions/` plus one, zero-padded to four. Never
@@ -94,14 +96,17 @@ Sections, in this exact order:
   sessions" is checkable by an agent reading metrics. "In six months" is not.
 
 Report: the ID, the path, **the alternatives table inline** so the user can correct it in thirty
-seconds, any supersession you applied, and — if `reversal_cost` is `irreversible` — say so loudly.
-Close with the quarantine notice: the note is `#tl/draft` and `/throughline:why` will not surface it
-until the tag is removed by hand.
+seconds, and — if `reversal_cost` is `irreversible` — say so loudly. If this supersedes an earlier
+decision, name it and give the edit that completes the supersession when the draft is promoted: on
+the predecessor, `status: superseded` and `superseded_by: "[[D-NNNN <this note's title>]]"`, nothing
+else. Close with the quarantine notice: the note is `#tl/draft`, and neither the brief nor
+`/throughline:why` will treat it as settled until a human promotes it (checklist in
+`98 Meta/How Throughline Works.md`).
 
 ## Constraints
 
-- **The only existing note you may touch is one predecessor Decision**, and only its `status` and
-  `superseded_by` fields.
+- **Never modify an existing note.** A supersession is proposed by the new draft's `supersedes` and
+  completed by the human who promotes it.
 - Never delete, never rename, never overwrite. Supersede instead — renames break wikilinks and
   destroy the audit trail.
 - Never remove a `tl/draft` tag.

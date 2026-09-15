@@ -1,11 +1,16 @@
 #!/bin/sh
-# tl-validate - static checks over the Throughline repository.
+# tl-validate - checks over the Throughline repository.
 #
-# Everything here is checkable without opening Obsidian. The things that are NOT
-# checkable headlessly - whether a .base file actually renders - live in
-# vault/Throughline/98 Meta/VERIFY.md and need human eyes.
+# Two kinds of check. Static: the plugin's shape and the vault's written
+# contracts. Behavioural: the real hook scripts run against a disposable copy of
+# the shipped vault - the draft quarantine is a behaviour, and grepping a script
+# for a string proves nothing about it.
 #
-# Exits non-zero on the first failing check so it is usable as a gate.
+# What is NOT checkable headlessly - whether a .base file actually renders -
+# lives in vault/Throughline/98 Meta/VERIFY.md and needs human eyes.
+#
+# Runs every check, then exits non-zero if any failed, so it is usable as a gate.
+# Needs sh, awk, git and node.
 
 set -u
 
@@ -18,9 +23,12 @@ say()  { printf '%s\n' "$*"; }
 ok()   { printf '  ok    %s\n' "$*"; }
 bad()  { printf '  FAIL  %s\n' "$*"; fail=$((fail + 1)); }
 
+have_node=0
+command -v node >/dev/null 2>&1 && have_node=1
+
 say ''
-say 'Throughline · static validation'
-say '================================'
+say 'Throughline · validation'
+say '========================'
 
 # ---------------------------------------------------------------- shell ---
 say ''
@@ -33,14 +41,18 @@ done
 # ----------------------------------------------------------------- json ---
 say ''
 say 'Manifests are valid JSON'
-for f in "$root/.claude-plugin/marketplace.json" "$plugin/.claude-plugin/plugin.json" "$plugin/hooks/hooks.json"; do
-  [ -f "$f" ] || { bad "${f#$root/} - missing"; continue; }
-  if node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$f" 2>/dev/null; then
-    ok "${f#$root/}"
-  else
-    bad "${f#$root/} - malformed"
-  fi
-done
+if [ "$have_node" = 0 ]; then
+  bad 'node not found - manifests not checked (install Node.js)'
+else
+  for f in "$root/.claude-plugin/marketplace.json" "$plugin/.claude-plugin/plugin.json" "$plugin/hooks/hooks.json"; do
+    [ -f "$f" ] || { bad "${f#$root/} - missing"; continue; }
+    if node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$f" 2>/dev/null; then
+      ok "${f#$root/}"
+    else
+      bad "${f#$root/} - malformed"
+    fi
+  done
+fi
 
 # -------------------------------------------------------------- inventory ---
 # The plugin's shape is a product constraint, not an accident: two hooks that
@@ -69,15 +81,23 @@ for f in "$plugin"/skills/*/SKILL.md; do
 done
 
 # --------------------------------------------------------------- the vault ---
+# Each contract below is one that retrieval silently depends on: a Gotcha in the
+# wrong folder, with an unknown status, or linked to something that is not a
+# Component never reaches the brief, and nothing says so.
 say ''
-say 'Vault notes parse and link'
+say 'Vault notes honour their contracts'
+if [ "$have_node" = 0 ]; then
+  bad 'node not found - vault contracts not checked (install Node.js)'
+else
 node - "$vault" <<'NODE'
 const fs = require('fs'), path = require('path');
 const root = process.argv[2];
 const mds = [], bases = [];
 (function walk(d) {
   for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-    if (e.name === '.obsidian') continue;
+    // Dot-folders are app state (.obsidian, .trash). 04 Briefs is disposable,
+    // gitignored output that is never knowledge and has no status.
+    if (e.name.startsWith('.') || e.name === '04 Briefs') continue;
     const p = path.join(d, e.name);
     if (e.isDirectory()) walk(p);
     else if (e.name.endsWith('.md')) mds.push(p);
@@ -85,55 +105,352 @@ const mds = [], bases = [];
   }
 })(root);
 
-// Base files are linked by full filename ("Needs Review.base"); notes by basename.
-const targets = new Set([
-  ...mds.map(p => path.basename(p, '.md')),
-  ...bases.map(p => path.basename(p)),
-]);
+const read = p => {
+  const t = fs.readFileSync(p, 'utf8');
+  return (t.charCodeAt(0) === 0xFEFF ? t.slice(1) : t).replace(/\r\n?/g, '\n');   // BOM, CRLF
+};
+const rel = p => path.relative(root, p).split(path.sep).join('/');
 
-// Wikilinks inside fenced or inline code are documentation ABOUT the syntax,
-// not links. Stripping them is what keeps this check honest rather than noisy.
-const strip = t => t.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '');
+// Frontmatter is read with the same rules as bin/tl-brief: flow and block lists,
+// quoted or bare items. A check that parsed differently would test a different
+// system from the one that ships.
+const unquote = s => {
+  s = s.trim();
+  return s.length >= 2 && (s[0] === '"' || s[0] === "'") && s.endsWith(s[0]) ? s.slice(1, -1) : s;
+};
+const flowItems = s => {
+  s = s.trim().replace(/^\[/, '').replace(/\]\s*$/, '');
+  const out = []; let q = '', item = '';
+  for (const c of s) {
+    if (q) { if (c === q) q = ''; }
+    else if ((c === '"' || c === "'") && item.trim() === '') q = c;
+    else if (c === ',') { out.push(item); item = ''; continue; }
+    item += c;
+  }
+  out.push(item);
+  return out.map(unquote).filter(Boolean);
+};
+function frontmatter(text) {
+  const lines = text.split('\n');
+  if (!/^---[ \t]*$/.test(lines[0])) return null;
+  const close = lines.findIndex((l, i) => i > 0 && /^---[ \t]*$/.test(l));
+  if (close < 0) return null;
+  const fm = {}; let key = null, inflow = false;
+  for (const line of lines.slice(1, close)) {
+    const k = /^([A-Za-z_][A-Za-z0-9_-]*):(.*)$/.exec(line);
+    if (k) {
+      key = k[1]; inflow = false;
+      const v = k[2].trim();
+      if (v === '') fm[key] = [];
+      else if (v.startsWith('[')) { fm[key] = flowItems(v); inflow = !/\]\s*$/.test(v); }
+      else fm[key] = unquote(v.replace(/\s+#.*$/, ''));
+    } else if (key && inflow) {
+      fm[key].push(...flowItems(line));
+      if (/\]\s*$/.test(line)) inflow = false;
+    } else if (key && /^\s*-(\s|$)/.test(line)) {
+      if (!Array.isArray(fm[key])) fm[key] = [];
+      const item = unquote(line.replace(/^\s*-\s*/, ''));
+      if (item) fm[key].push(item);
+    }
+  }
+  return { fm, body: lines.slice(close + 1).join('\n') };
+}
+const list = v => Array.isArray(v) ? v : (v ? [v] : []);
+const filled = v => list(v).length > 0;
+const linkName = s => path.posix.basename(unquote(s).replace(/^\[+/, '').replace(/\]+$/, '').replace(/[|#].*$/, '').trim()).replace(/\.md$/, '');
+
+// Wikilinks and tags inside fenced or inline code are documentation ABOUT the
+// syntax. Obsidian ignores them, and so does every check here.
+const stripCode = t => t.replace(/```[\s\S]*?```/g, '').replace(/~~~[\s\S]*?~~~/g, '').replace(/`[^`\n]*`/g, '');
+const DRAFT_TAG = /(^|[^A-Za-z0-9_\/-])#?tl\/draft(\/|[^A-Za-z0-9_-]|$)/;
+const DRAFT_INLINE = /(^|[^A-Za-z0-9_\/&-])#tl\/draft(\/|[^A-Za-z0-9_-]|$)/m;
+const isDraft = (fm, body) =>
+  [...list(fm.tags), ...list(fm.tag)].some(t => DRAFT_TAG.test(t)) || DRAFT_INLINE.test(stripCode(body));
+
+const TL_TAGS = new Set(['needs-review', 'unverified', 'hot', 'security', 'performance', 'breaking',
+  'external', 'temporary', 'painful', 'inherited', 'draft']);
+const STATUS = {
+  decision: ['proposed', 'active', 'superseded', 'reversed'],
+  component: ['active', 'deprecated', 'planned'],
+  gotcha: ['open', 'resolved', 'wontfix'],
+  session: ['complete', 'abandoned'],
+  spec: ['draft', 'ready', 'building', 'done', 'abandoned'],
+  term: ['active', 'deprecated'],
+  practice: ['active', 'deprecated'],
+  hub: ['active'],
+};
+const REQUIRED = {                       // "Required beyond the contract", Note Types Reference
+  decision: ['affects', 'confidence'], component: ['paths'], gotcha: ['affects', 'severity', 'cost'],
+  session: ['duration', 'branch', 'touched'], spec: ['affects'], practice: ['scope'],
+};
+const PROJECT_DIR = { decision: 'Decisions', component: 'Components', gotcha: 'Gotchas', session: 'Sessions', spec: 'Specs' };
 
 let issues = 0;
+const fail = (r, msg) => { console.log(`  FAIL  ${r} - ${msg}`); issues++; };
+
+const views = new Map();
+for (const b of bases) {
+  views.set(path.basename(b), new Set([...read(b).matchAll(/^\s+name:\s*(.+?)\s*$/gm)].map(m => unquote(m[1]))));
+}
+const targets = new Set([...mds.map(p => path.basename(p, '.md')), ...views.keys()]);
+
+const notes = new Map();
 for (const p of mds) {
-  const raw = fs.readFileSync(p, 'utf8');
-  const rel = path.relative(root, p).split(path.sep).join("/");
-  if (!raw.startsWith('---\n')) { console.log(`  FAIL  ${rel} - no YAML frontmatter`); issues++; continue; }
-  const fm = raw.slice(4, raw.indexOf('\n---', 4));
-  for (const key of ['type:', 'status:', 'created:', 'source:']) {
-    if (!new RegExp('^' + key, 'm').test(fm)) { console.log(`  FAIL  ${rel} - frontmatter missing ${key}`); issues++; }
+  const r = rel(p), text = read(p), parsed = frontmatter(text);
+  if (!parsed) { fail(r, 'no YAML frontmatter'); continue; }
+  const { fm, body } = parsed;
+  const template = r.startsWith('90 Templates/');
+  notes.set(path.basename(p, '.md'), { r, fm, template, draft: isDraft(fm, body) });
+
+  for (const key of ['type', 'status', 'project', 'created', 'updated', 'source']) {
+    if (!(key in fm)) fail(r, `frontmatter missing ${key}:`);
   }
-  for (const m of strip(raw).matchAll(/\[\[([^\]|#]+)/g)) {
-    const t = m[1].trim();
-    if (!targets.has(t)) { console.log(`  FAIL  ${rel} - broken wikilink [[${t}]]`); issues++; }
+  if (fm.source !== undefined && !['human', 'agent', 'backfill'].includes(fm.source)) {
+    fail(r, `source: ${fm.source} is not human, agent, or backfill`);
+  }
+  const type = fm.type;
+  if (type !== undefined && !STATUS[type]) fail(r, `unknown type: ${type}`);
+  else if (type !== undefined && !STATUS[type].includes(fm.status)) {
+    fail(r, `status: ${fm.status} is not valid for a ${type} (${STATUS[type].join(' | ')})`);
+  }
+
+  const inline = [...stripCode(body).matchAll(/(?:^|[^A-Za-z0-9_\/&-])#(tl\/[A-Za-z0-9_\/-]+)/gm)].map(m => m[1]);
+  for (const t of [...list(fm.tags), ...list(fm.tag), ...inline].map(t => t.replace(/^#/, ''))) {
+    if (t.startsWith('tl/') && !TL_TAGS.has(t.slice(3))) fail(r, `unknown tag ${t} - a misspelt tl/draft quarantines nothing`);
+  }
+
+  for (const m of stripCode(text).matchAll(/\[\[([^\]|#]+)(#[^\]|]*)?/g)) {
+    const t = m[1].trim(), view = m[2] ? m[2].slice(1).trim() : '';
+    if (!targets.has(t)) fail(r, `broken wikilink [[${t}]]`);
+    else if (t.endsWith('.base') && view && !views.get(t).has(view)) fail(r, `[[${t}#${view}]] names no view in ${t}`);
+  }
+
+  if (template || !STATUS[type] || type === 'hub') continue;
+
+  for (const key of REQUIRED[type] || []) {
+    if (!filled(fm[key])) fail(r, `${type} needs a non-empty ${key}`);
+  }
+  if (r.startsWith('99 Archive/')) continue;
+  if (PROJECT_DIR[type]) {
+    const m = /^01 Projects\/([^/]+)\/([^/]+)\/[^/]+\.md$/.exec(r);
+    if (!m || m[2] !== PROJECT_DIR[type]) fail(r, `a ${type} belongs in 01 Projects/<project>/${PROJECT_DIR[type]}/`);
+    else if (fm.project !== m[1]) fail(r, `project: ${fm.project} does not match its folder ${m[1]}`);
+  } else {
+    const dir = type === 'term' ? '02 Domain' : '03 Practices';
+    if (!new RegExp(`^${dir}/[^/]+\\.md$`).test(r)) fail(r, `a ${type} belongs in ${dir}/`);
+    if (fm.project !== 'global') fail(r, `a ${type} is project: global`);
   }
 }
+
+// Cross-note contracts, once every note is known.
+for (const [name, n] of notes) {
+  const { r, fm, template } = n;
+  if (template) continue;
+  if (['decision', 'gotcha', 'spec'].includes(fm.type)) {
+    for (const t of list(fm.affects).map(linkName)) {
+      const c = notes.get(t);
+      if (c && (c.fm.type !== 'component' || c.fm.project !== fm.project)) {
+        fail(r, `affects [[${t}]], which is not a Component in project ${fm.project}`);
+      }
+    }
+  }
+  if (fm.type !== 'decision') continue;
+  const by = list(fm.superseded_by).map(linkName)[0];
+  if (fm.status === 'superseded' && !by) fail(r, 'status: superseded without superseded_by');
+  if (by && notes.has(by)) {
+    const s = notes.get(by);
+    if (s.draft) fail(r, `superseded_by [[${by}]], an unpromoted draft - supersession is completed when a human promotes it`);
+    else if (!list(s.fm.supersedes).map(linkName).includes(name)) fail(r, `superseded_by [[${by}]], but that note does not declare supersedes`);
+  }
+  if (!n.draft && fm.status === 'active') {
+    for (const t of list(fm.supersedes).map(linkName)) {
+      const pre = notes.get(t);
+      if (pre && (pre.fm.status !== 'superseded' || list(pre.fm.superseded_by).map(linkName)[0] !== name)) {
+        fail(r, `supersedes [[${t}]], which is not marked superseded_by this note - the supersession was never completed`);
+      }
+    }
+  }
+}
+
 const label = issues === 0 ? '  ok  ' : '  FAIL';
 console.log(`${label}  ${mds.length} notes, ${bases.length} bases, ${issues} issue(s)`);
 process.exit(issues === 0 ? 0 : 1);
 NODE
 [ $? -eq 0 ] || fail=$((fail + 1))
-
-# ------------------------------------------------------------ the quarantine ---
-# The single rule that makes automatic capture safe. If a draft ever reaches a
-# retrieval path, the vault stops being trustworthy and the product is dead.
-say ''
-say 'Draft quarantine is enforced in the retrieval path'
-if grep -q 'tl\/draft' "$plugin/bin/tl-brief"; then
-  ok 'tl-brief filters #tl/draft'
-else
-  bad 'tl-brief does not filter #tl/draft'
 fi
-if grep -q 'status == "active"' "$plugin/bin/tl-brief" && grep -q 'status == "open"' "$plugin/bin/tl-brief"; then
-  ok 'tl-brief admits only active decisions and open gotchas'
+
+# ------------------------------------------------------ disposable fixture ---
+tmp=''
+cleanup() { [ -n "$tmp" ] && [ -d "$tmp" ] && rm -rf "$tmp"; }
+trap cleanup EXIT
+trap 'cleanup; exit 1' INT TERM
+
+fixture_ok=0
+if ! command -v git >/dev/null 2>&1; then
+  say ''
+  bad 'git not found - hook behaviour not checked'
+elif ! tmp=$(mktemp -d 2>/dev/null) || [ ! -d "$tmp" ]; then
+  say ''
+  bad 'could not create a temporary directory - hook behaviour not checked'
+  tmp=''
 else
-  bad 'tl-brief status filtering missing'
+  fx="$tmp/vault"; repo="$tmp/repo"; proj="$fx/01 Projects/example-api"
+  g3="$proj/Gotchas/G-0003 Logged-out sessions still resolve for up to 30 seconds.md"
+  fresh_vault() { rm -rf "$fx" && cp -R "$vault" "$fx"; }
+  fresh_vault
+  mkdir -p "$repo/src/auth/store" "$repo/src/billing/webhooks"
+  printf 'x\n' > "$repo/src/auth/session.ts"
+  printf 'x\n' > "$repo/src/billing/webhooks/handler.ts"
+  printf 'project: example-api\nvault: %s\n' "$fx" > "$repo/.throughline"
+  # A throwaway repository: pin the settings a user's global config could vary.
+  if git -C "$repo" init -q >/dev/null 2>&1 \
+    && git -C "$repo" -c core.autocrlf=false add -A >/dev/null 2>&1 \
+    && git -C "$repo" -c user.name=tl-validate -c user.email=tl-validate@localhost \
+         -c commit.gpgsign=false -c core.hooksPath=.git/hooks commit -qm fixture >/dev/null 2>&1 \
+    && git -C "$repo" checkout -qb feat/session-postgres >/dev/null 2>&1; then
+    printf 'y\n' >> "$repo/src/auth/session.ts"
+    fixture_ok=1
+  else
+    say ''
+    bad 'could not build the fixture repository - hook behaviour not checked'
+  fi
+fi
+
+# ----------------------------------------------------- retrieval behaviour ---
+# The expected output is the example printed in README.md. If the brief and the
+# README ever disagree, one of them is wrong.
+if [ "$fixture_ok" = 1 ]; then
+  say ''
+  say 'SessionStart brief behaves as documented'
+  brief() { (cd "$repo" && unset THROUGHLINE_DISTILLING && PATH="${strict:-}$PATH" THROUGHLINE_VAULT="$fx" sh "$plugin/bin/tl-brief") 2>/dev/null; }
+  awk '{ sub(/\r$/, "") }
+       /^## Example: what the SessionStart brief actually produces/ { section = 1; next }
+       section && /^```/ { if (block) exit; block = 1; next }
+       block { print }' "$root/README.md" > "$tmp/expected"
+  brief > "$tmp/actual"
+  if [ -s "$tmp/expected" ] && cmp -s "$tmp/expected" "$tmp/actual"; then
+    ok 'output matches the example in README.md'
+  else
+    bad 'output differs from the example in README.md'
+    diff "$tmp/expected" "$tmp/actual" | sed 's/^/        /'
+  fi
+
+  # The same draft, written every way a model or a person plausibly writes it.
+  tr -d '\r' < "$g3" > "$tmp/g3"
+  quarantined() {
+    out=$(brief)
+    case "$out" in
+      *'G-0001 Redis TTL'*) case "$out" in
+                              *G-0003*) bad "draft leaked into the brief: $1" ;;
+                              *)        ok "draft excluded: $1" ;;
+                            esac ;;
+      *) bad "brief produced no output to check: $1" ;;
+    esac
+  }
+  sed '/^  - tl\/draft$/d; /^  - tl\/security$/d; s/^tags:$/tags: [tl\/draft, tl\/security]/' "$tmp/g3" > "$g3"
+  quarantined 'flow list  tags: [tl/draft, tl/security]'
+  sed 's/^  - tl\/draft$/  - "tl\/draft"/' "$tmp/g3" > "$g3"
+  quarantined 'quoted item  - "tl/draft"'
+  sed '/^  - tl\/draft$/d' "$tmp/g3" | awk '{ print } /^## Symptom$/ { print "Unconfirmed. #tl/draft" }' > "$g3"
+  quarantined 'inline #tl/draft in the body'
+  sed '/^  - tl\/draft$/d' "$tmp/g3" > "$g3"
+  case "$(brief)" in
+    *G-0003*) ok 'control: the same note without the tag is retrieved' ;;
+    *)        bad 'control: the untagged note is missing - the checks above prove nothing' ;;
+  esac
+
+  # Obsidian's Properties panel writes lists in block style, including on the
+  # edit that promotes a draft. Retrieval must not care.
+  fresh_vault
+  for f in "$proj"/*/*.md; do
+    awk '{ sub(/\r$/, "") }
+         /^(paths|affects|open_threads): \[".*"\]$/ {
+           k = $0; sub(/:.*/, "", k); v = $0; sub(/^[^[]*\["/, "", v); sub(/"\]$/, "", v)
+           n = split(v, a, /", "/); print k ":"
+           for (i = 1; i <= n; i++) print "  - " (k == "affects" ? "\"" a[i] "\"" : a[i])
+           next }
+         { print }' "$f" > "$tmp/rewrite" && cp "$tmp/rewrite" "$f"
+  done
+  if ! grep -q '^  - src/auth/store/$' "$proj/Components/C-0002 Session store.md"; then
+    bad 'block-list fixture was not written - check not run'
+  elif [ "$(brief)" = "$(cat "$tmp/expected")" ]; then
+    ok 'block-style lists, as Obsidian writes them, retrieve identically'
+  else
+    bad 'block-style lists change what the brief retrieves'
+  fi
+
+  # Windows tools write CRLF, and Windows PowerShell 5.1 adds a byte-order mark.
+  fresh_vault
+  bom=$(printf '\357\273\277')
+  find "$fx" -name '*.md' | while IFS= read -r f; do
+    awk -v BOM="$bom" 'FNR == 1 { printf "%s", BOM } { sub(/\r$/, ""); printf "%s\r\n", $0 }' "$f" > "$tmp/rewrite" \
+      && cp "$tmp/rewrite" "$f"
+  done
+  # gawk on Windows reads in text mode and drops the CR itself, which would hide
+  # a regression on exactly the platform most likely to produce CRLF. Binary
+  # mode reads the bytes the way every Linux and macOS awk does.
+  strict=''
+  if awk --version 2>/dev/null | grep -q 'GNU Awk'; then
+    mkdir -p "$tmp/strict"
+    printf '#!/bin/sh\nexec "%s" -v BINMODE=3 "$@"\n' "$(command -v awk)" > "$tmp/strict/awk"
+    chmod +x "$tmp/strict/awk" && strict="$tmp/strict:"
+  fi
+  if ! od -c "$proj/Components/C-0002 Session store.md" | head -1 | grep -q '357 273 277.*\\r'; then
+    bad 'CRLF fixture was not written - check not run'
+  elif [ "$(brief)" = "$(cat "$tmp/expected")" ]; then
+    ok 'CRLF notes with a byte-order mark retrieve identically'
+  else
+    bad 'CRLF or byte-order-marked notes change what the brief retrieves'
+  fi
+  strict=''
+
+  fresh_vault
+  out=$(cd "$tmp" && unset THROUGHLINE_DISTILLING && THROUGHLINE_VAULT="$fx" sh "$plugin/bin/tl-brief" 2>&1)
+  if [ $? -eq 0 ] && [ -z "$out" ]; then ok 'silent, exit 0, outside a Throughline repository'
+  else bad 'not silent outside a Throughline repository'; fi
+fi
+
+# ---------------------------------------------------- distillation guard ---
+# The distiller is a headless Claude Code session, and its own SessionEnd runs
+# the hook again. A stub stands in for the CLI - it behaves as the real one does,
+# inheriting the environment and firing SessionEnd - so no model is ever called.
+if [ "$fixture_ok" = 1 ]; then
+  say ''
+  say 'SessionEnd distiller cannot re-trigger itself'
+  stub="$tmp/stub"; mkdir -p "$tmp/bin" "$stub"
+  cat > "$tmp/bin/claude" <<'STUB'
+#!/bin/sh
+echo x >> "$TL_STUB/spawns"
+while [ $# -gt 0 ]; do [ "$1" = --allowedTools ] && printf '%s\n' "$2" > "$TL_STUB/tools"; shift; done
+[ "$(wc -l < "$TL_STUB/spawns" | tr -d ' ')" -ge 3 ] && exit 0
+printf '{"type":"tool_use"}\n{"type":"tool_use"}\n{"type":"tool_use"}\n' > "$TL_STUB/child.jsonl"
+printf '{"transcript_path":"%s","cwd":"%s"}' "$TL_STUB/child.jsonl" "$PWD" | sh "$TL_HOOK"
+echo done >> "$TL_STUB/finished"
+STUB
+  chmod +x "$tmp/bin/claude"
+  if [ "$(PATH="$tmp/bin:$PATH"; command -v claude)" != "$tmp/bin/claude" ]; then
+    bad 'stub is not first on PATH - skipped rather than risk a real model call'
+  else
+    printf '{"type":"tool_use"}\n{"type":"tool_use"}\n{"type":"tool_use"}\n' > "$tmp/session.jsonl"
+    printf '{"transcript_path":"%s","cwd":"%s"}' "$tmp/session.jsonl" "$repo" \
+      | (unset THROUGHLINE_DISTILLING THROUGHLINE_LOG; PATH="$tmp/bin:$PATH" THROUGHLINE_VAULT="$fx" \
+         TL_STUB="$stub" TL_HOOK="$plugin/bin/tl-session-end" sh "$plugin/bin/tl-session-end")
+    i=0; while [ ! -f "$stub/finished" ] && [ "$i" -lt 15 ]; do sleep 1; i=$((i + 1)); done
+    sleep 2    # long enough for a second generation to appear, if the guard broke
+    spawns=$(cat "$stub/spawns" 2>/dev/null | wc -l | tr -d ' ')
+    [ "$spawns" = 1 ] && ok 'one session end spawns exactly one distiller' \
+                      || bad "one session end spawned $spawns distiller(s), expected 1"
+    if [ -f "$stub/tools" ] && ! grep -q Bash "$stub/tools"; then
+      ok "the distiller has no shell ($(cat "$stub/tools"))"
+    else
+      bad 'the distiller was given Bash, or its tool list was not recorded'
+    fi
+  fi
 fi
 
 say ''
 if [ "$fail" -eq 0 ]; then
-  say 'All static checks passed.'
+  say 'All checks passed.'
   say 'Dashboard rendering still needs a human: see vault/Throughline/98 Meta/VERIFY.md'
   exit 0
 fi

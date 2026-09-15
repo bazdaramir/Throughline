@@ -12,6 +12,18 @@
 #   - Never include a Session note body - only open_threads.
 #   - Only status: active Decisions and status: open Gotchas.
 #
+# WHAT COUNTS AS A DRAFT is decided the way Obsidian decides it, so that the
+# Needs Review queue and this brief can never disagree: tl/draft in frontmatter
+# tags in any YAML shape, or #tl/draft inline in the body outside code. When in
+# doubt a note is treated as a draft - leaving a real note out of the brief is
+# visible in the queue, while letting a draft in is invisible.
+#
+# FRONTMATTER SHAPES: Obsidian's Properties panel rewrites every list it touches
+# as a block list, including on the edit that promotes a draft. Flow lists
+# (key: ["a", "b"]), block lists, quoted and bare items, CRLF line endings and a
+# byte-order mark are all read identically. A parser that only knows one shape
+# drops promoted notes out of retrieval without a sound.
+#
 # PERFORMANCE: the <2s budget is a hard limit and process spawns dominate the
 # cost, so frontmatter is extracted in bulk - one awk pass per note type.
 # Do not reintroduce per-file grep/sed loops.
@@ -20,19 +32,29 @@ set -u
 
 BUDGET_CHARS=1500       # ~400 tokens at a conservative ~3.75 chars/token
 S='@@'                  # field separator; cannot occur in a note title or path
+BOM=$(printf '\357\273\277')  # UTF-8 byte-order mark, as Windows PowerShell 5.1 writes it
 
 # ---------------------------------------------------------------- guards ---
 # Any failure here means "say nothing", never "fail loudly".
 
+# The SessionEnd distiller is a headless Claude Code session; a brief in its
+# context is noise about someone else's work.
+[ -n "${THROUGHLINE_DISTILLING:-}" ] && exit 0
+
 [ -f ./.throughline ] || exit 0
 
-proj=$(sed -n 's/^project:[[:space:]]*//p' ./.throughline 2>/dev/null | head -1 | tr -d '\r')
+# One key from .throughline. Hand edits add quotes and trailing blanks; neither
+# is part of a slug or a path, and either one used to fail silently.
+tlconf() {
+  sed -n "s/^$1:[[:space:]]*//p" ./.throughline 2>/dev/null | head -1 | tr -d '\r' \
+    | sed -e 's/[[:space:]]*$//' -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/"
+}
+
+proj=$(tlconf project)
 [ -n "$proj" ] || exit 0
 
 vault="${THROUGHLINE_VAULT:-}"
-if [ -z "$vault" ]; then
-  vault=$(sed -n 's/^vault:[[:space:]]*//p' ./.throughline 2>/dev/null | head -1 | tr -d '\r')
-fi
+[ -n "$vault" ] || vault=$(tlconf vault)
 [ -n "$vault" ] || vault="$HOME/Throughline"
 case "$vault" in
   '~/'*) vault="$HOME/${vault#\~/}" ;;
@@ -50,48 +72,97 @@ git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
 branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '')
 changed=$(
   {
-    git status --porcelain 2>/dev/null | cut -c4-
-    git diff --name-only HEAD~3 2>/dev/null || git diff --name-only HEAD 2>/dev/null
+    git -c core.quotepath=off status --porcelain 2>/dev/null | cut -c4-
+    git -c core.quotepath=off diff --name-only HEAD~3 2>/dev/null \
+      || git -c core.quotepath=off diff --name-only HEAD 2>/dev/null
   } | sed 's/^"//; s/"$//' | grep -v '^$' | sort -u
 )
 [ -n "$changed" ] || exit 0
 
 # --------------------------------------------------- bulk frontmatter awk ---
-# Shared prologue: walks only the frontmatter block, tracks the tl/draft
-# quarantine, and collects the fields each note type needs.
+# Shared prologue: reads the frontmatter block (which must open on line 1, as
+# in Obsidian), decides the tl/draft quarantine, and collects the fields each
+# note type needs. List values accumulate in val[], joined by SEP.
 AWK_FM='
-function base(p,   n,a) { n = split(p, a, "/"); p = a[n]; sub(/\.md$/, "", p); return p }
-function quoted(line,   out, s) {
-  out = ""
-  while (match(line, /"[^"]*"/)) {
-    s = substr(line, RSTART + 1, RLENGTH - 2)
-    out = out (out ? SEP : "") s
-    line = substr(line, RSTART + RLENGTH)
+BEGIN { LIST["paths"] = LIST["affects"] = LIST["open_threads"] = LIST["tags"] = LIST["tag"] = 1 }
+function base(p,   n, a) { n = split(p, a, "/"); p = a[n]; sub(/\.md$/, "", p); return p }
+function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+function unquote(s,   c) {
+  s = trim(s); c = substr(s, 1, 1)
+  if (length(s) >= 2 && (c == "\"" || c == Q) && substr(s, length(s), 1) == c)
+    s = substr(s, 2, length(s) - 2)
+  return s
+}
+function add(k, v) {
+  v = unquote(v)
+  if (k == "affects") {            # a link: keep only the target note name
+    sub(/^\[+/, "", v); sub(/\]+$/, "", v); sub(/[|#].*$/, "", v)
+    v = base(trim(v))
+  } else if (k == "paths") {       # repo-relative, as git reports them
+    sub(/^\.\//, "", v); sub(/^\//, "", v)
   }
-  return out
+  if (v != "") val[k] = (val[k] == "") ? v : val[k] SEP v
+}
+function flowlist(k, s,   i, c, q, item) {
+  s = trim(s); sub(/^\[/, "", s); sub(/\][ \t]*$/, "", s)
+  q = ""; item = ""
+  for (i = 1; i <= length(s); i++) {
+    c = substr(s, i, 1)
+    if (q != "")                                        { if (c == q) q = "" }
+    else if ((c == "\"" || c == Q) && trim(item) == "") { q = c }
+    else if (c == ",")                                  { add(k, item); item = ""; continue }
+    item = item c
+  }
+  add(k, item)
+}
+function scalar(k, v) {
+  sub(/[ \t]+#.*$/, "", v); v = unquote(v)
+  if (k == "status") status = v; else if (k == "reversal_cost") rc = v
+  else if (k == "severity") sev = v; else if (k == "branch") br = v
+  else if (k == "cost") cost = v
+}
+function drafted(   n, a, i) {
+  n = split(val["tags"] SEP val["tag"], a, SEP)
+  for (i = 1; i <= n; i++)
+    if (a[i] ~ /^#?tl\/draft(\/|[^A-Za-z0-9_-]|$)/ || a[i] ~ /[^A-Za-z0-9_\/-]#?tl\/draft(\/|[^A-Za-z0-9_-]|$)/)
+      draft = 1
+  return draft
 }
 FNR == 1 {
   flush()
-  f = FILENAME; draft = 0; infm = 0; nfm = 0
+  f = FILENAME; draft = 0; infm = 0; fence = 0; key = ""; inflow = 0
   status = ""; rc = ""; cost = ""; sev = ""; br = ""
-  paths = ""; affects = ""; threads = ""
+  split("", val)
 }
-/^---[ \t]*$/ { nfm++; infm = (nfm == 1); next }
-!infm { next }
-/^[ \t]*-[ \t]*tl\/draft[ \t]*$/ { draft = 1 }
-/^status:/        { status = $2 }
-/^reversal_cost:/ { rc = $2 }
-/^severity:/      { sev = $2 }
-/^branch:/        { br = $2 }
-/^cost:/          { cost = $2; gsub(/"/, "", cost) }
-/^paths:/         { paths = quoted($0) }
-/^affects:/       { affects = $0 }
-/^open_threads:/  { threads = quoted($0) }
+{ sub(/\r$/, "") }
+FNR == 1 && index($0, BOM) == 1 { $0 = substr($0, length(BOM) + 1) }
+FNR == 1 && /^---[ \t]*$/ { infm = 1; next }
+infm && /^---[ \t]*$/     { infm = 0; next }
+infm {
+  if ($0 ~ /^[A-Za-z_][A-Za-z0-9_-]*:/) {
+    key = $0; sub(/:.*/, "", key); inflow = 0
+    value = $0; sub(/^[^:]*:/, "", value); value = trim(value)
+    if (value == "") next                               # a block list may follow
+    if (!(key in LIST)) scalar(key, value)
+    else if (substr(value, 1, 1) != "[") add(key, value)
+    else { flowlist(key, value); inflow = (value !~ /\][ \t]*$/) }
+  } else if (inflow) {                                  # a flow list split across lines
+    flowlist(key, $0); if ($0 ~ /\][ \t]*$/) inflow = 0
+  } else if (key in LIST && $0 ~ /^[ \t]*-([ \t]|$)/) {
+    value = $0; sub(/^[ \t]*-[ \t]*/, "", value); add(key, value)
+  }
+  next
+}
+/^[ \t]*(```|~~~)/ { fence = !fence; next }
+!fence {
+  line = $0; gsub(/`[^`]*`/, "", line)
+  if (line ~ /(^|[^A-Za-z0-9_\/&-])#tl\/draft(\/|[^A-Za-z0-9_-]|$)/) draft = 1
+}
 '
 
 # --------------------------------------- changed paths -> Components -------
-comp_rows=$(awk -v SEP="$S" "$AWK_FM"'
-function flush() { if (f != "" && !draft && paths != "") print base(f) SEP paths }
+comp_rows=$(awk -v SEP="$S" -v Q="'" -v BOM="$BOM" "$AWK_FM"'
+function flush() { if (f != "" && !drafted() && val["paths"] != "") print base(f) SEP val["paths"] }
 END { flush() }
 ' "$pdir"/Components/*.md 2>/dev/null)
 
@@ -121,14 +192,15 @@ IFS=$oldIFS
 [ -n "$comp_names" ] || exit 0
 
 # --------------------------------- Components -> Decisions / Gotchas -------
-# Only promoted notes in the required status ever reach the shell.
-dec_rows=$(awk -v SEP="$S" "$AWK_FM"'
-function flush() { if (f != "" && !draft && status == "active" && affects != "") print base(f) SEP rc SEP affects }
+# Only promoted notes in the required status ever reach the shell. `affects`
+# arrives as the linked note names, so matching below is exact, not substring.
+dec_rows=$(awk -v SEP="$S" -v Q="'" -v BOM="$BOM" "$AWK_FM"'
+function flush() { if (f != "" && !drafted() && status == "active" && val["affects"] != "") print base(f) SEP rc SEP val["affects"] }
 END { flush() }
 ' "$pdir"/Decisions/*.md 2>/dev/null)
 
-got_rows=$(awk -v SEP="$S" "$AWK_FM"'
-function flush() { if (f != "" && !draft && status == "open" && affects != "") print base(f) SEP sev SEP cost SEP affects }
+got_rows=$(awk -v SEP="$S" -v Q="'" -v BOM="$BOM" "$AWK_FM"'
+function flush() { if (f != "" && !drafted() && status == "open" && val["affects"] != "") print base(f) SEP sev SEP cost SEP val["affects"] }
 END { flush() }
 ' "$pdir"/Gotchas/*.md 2>/dev/null)
 
@@ -140,8 +212,8 @@ for row in $dec_rows; do
   dbase=${row%%$S*};  rest=${row#*$S}
   rc=${rest%%$S*};    aff=${rest#*$S}
   for cname in $comp_names; do
-    case "$aff" in
-      *"$cname"*)
+    case "$S$aff$S" in
+      *"$S$cname$S"*)
         case "$rc" in
           irreversible) mark='  !! irreversible - do not contradict without asking' ;;
           '')           mark='' ;;
@@ -160,8 +232,8 @@ for row in $got_rows; do
   sev=${rest%%$S*};   rest=${rest#*$S}
   cost=${rest%%$S*};  aff=${rest#*$S}
   for cname in $comp_names; do
-    case "$aff" in
-      *"$cname"*)
+    case "$S$aff$S" in
+      *"$S$cname$S"*)
         meta=''
         [ -n "$sev" ]  && meta="  $sev"
         [ -n "$cost" ] && meta="$meta  cost: $cost"
@@ -175,11 +247,12 @@ done
 IFS=$oldIFS
 
 # ----------------------------------- last session's open threads (only) ----
-# ONLY the open_threads property is read. A Session note body is never touched.
+# ONLY the open_threads property is read. A Session note body is scanned for an
+# inline #tl/draft and nothing else - it never reaches the output.
 threads=''
 if [ -d "$pdir/Sessions" ]; then
-  threads=$(awk -v SEP="$S" -v want="$branch" "$AWK_FM"'
-function flush() { if (f != "" && threads != "" && (want == "" || br == want)) last = threads }
+  threads=$(awk -v SEP="$S" -v Q="'" -v BOM="$BOM" -v want="$branch" "$AWK_FM"'
+function flush() { if (f != "" && !drafted() && val["open_threads"] != "" && (want == "" || br == want)) last = val["open_threads"] }
 END {
   flush()
   if (last != "") { n = split(last, a, SEP); for (i = 1; i <= n; i++) print a[i] }

@@ -57,14 +57,18 @@ any existing `CLAUDE.md`. Then classify **every** commit into exactly one of:
 **Most commits are noise.** A backfill that finds significance everywhere is producing landfill.
 
 Order of work: Components first (they are the join key everything else attaches to), then Decisions,
-then Gotchas. Cross-link as you go — `affects` on Decisions and Gotchas must point at Components you
-created in the same pass.
+then Gotchas. Start by reading the Components that already exist, drafts included — `/throughline:init`
+tells users to map one first precisely so you have something to attach to. Cross-link as you go:
+`affects` on a Decision or Gotcha points at an existing Component wherever one covers the ground,
+and at one you created in this pass only where none does. **Never create a Component over ground an
+existing one already lists** — the same overlap rule as `/throughline:map`.
 
 ## Output targets
 
 **10–20 notes on a repo with 100+ commits.**
 
-- Fewer than 10 → your thresholds are too strict; loosen and re-scan.
+- Fewer than 10 → re-scan once with looser thresholds. If the history still does not support ten,
+  write fewer and say why. A target is never a reason to write a note the evidence does not support.
 - More than 25 → you are generating noise; tighten.
 
 ## Note contracts — follow them exactly
@@ -87,7 +91,8 @@ apart at a glance.
 Type-specific rules, all inherited from the `/decide`, `/gotcha`, and `/map` skill contracts:
 
 - **Components** — set `paths` precisely; it is the join key the whole retrieval layer depends on.
-  Never set a path so broad it captures unrelated code. Leave `## Known gotchas` and
+  Entries are repo-relative prefixes (`src/auth/`, `src/auth/session.ts`), never globs. Never set a
+  path so broad it captures unrelated code. Leave `## Known gotchas` and
   `## Decisions governing this` **empty**, carrying only their `<!-- populated from backlinks -->`
   comment.
 - **Decisions** — `affects` needs at least one Component. The `Alternatives considered` table is

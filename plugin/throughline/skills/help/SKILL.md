@@ -36,7 +36,7 @@ inspect the vault, do not resolve the project, do not personalise the output. It
 **Everything, by lifecycle stage**
 
 *Setup*
-- `/throughline:init [slug]` — make this repo Throughline-aware. Run once per repo.
+- `/throughline:init [slug] [--vault <path>]` — make this repo Throughline-aware. Run once per repo.
 - `/throughline:backfill [--since 90d]` — build the vault from your git history.
 
 *Capture — getting knowledge in*
@@ -54,12 +54,15 @@ inspect the vault, do not resolve the project, do not personalise the output. It
 - `/throughline:week` — the weekly review, including work that produced no knowledge at all.
 - `/throughline:audit` — eight checks of the vault against the codebase. Flags, never modifies.
 
-**The one ritual:** open `00 Command/Needs Review.base` in Obsidian once a week and clear it.
-Everything else is automatic. One ritual is sustainable; five are not.
+**The one ritual:** once a week, run `/throughline:week` for a keep-or-drop call on every draft, then
+clear `00 Command/Needs Review.base` in Obsidian. Everything else is automatic. One ritual is
+sustainable; five are not.
 
-**Everything a skill writes is quarantined** with `#tl/draft` and is invisible to `/throughline:brief`
-and `/throughline:why` until *you* promote it by deleting that tag. No skill can promote its own
-output. That is what makes automatic capture safe.
+**Every knowledge note Throughline writes is quarantined** with `#tl/draft` — invisible to the
+session brief, `/throughline:brief`, `/throughline:why`, and `/throughline:spec` until *you* promote
+it in Obsidian: remove the tag and set `last_verified` (the full checklist is in
+`98 Meta/How Throughline Works.md`). No skill can promote its own output. That is what makes
+automatic capture safe.
 
 **Two things happen without you asking.**
 

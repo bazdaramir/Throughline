@@ -8,7 +8,7 @@ source: human
 affects: ["[[C-0002 Session store]]", "[[C-0003 Billing webhook receiver]]"]
 confidence: high
 reversal_cost: high
-last_verified: 2026-02-10
+last_verified: 2026-06-05
 evidence: ["commit:8c41d0e"]
 ---
 

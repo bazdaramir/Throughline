@@ -15,8 +15,8 @@ tags:
   - tl/external
 ---
 
-> [!warning] Flagged by the auditor
-> `paths` still lists `src/billing/settlement.ts`, but settlement logic was split across three files in July and this note has not been updated. It is tagged `#tl/needs-review` so it shows up in the hygiene queue. **This is deliberate — it is what a real flagged note looks like on first open.**
+> [!warning] Flagged for review
+> `paths` still lists `src/billing/settlement.ts`, but settlement logic was split across three files in July and this note has not been updated. A human tagged it `#tl/needs-review` so it shows up in the hygiene queue — the auditor reports drift like this in the Audit Log, but never tags or edits a note itself. **This is deliberate — it is what a real flagged note looks like on first open.**
 
 ## What it does
 

@@ -57,11 +57,29 @@ No model runs. That means the brief is instant, costs nothing, and — the part 
 
 ## The draft quarantine
 
-Every automatically-generated note is tagged `#tl/draft` and carries `source: agent`.
+Every automatically-generated knowledge note is tagged `#tl/draft` and carries `source: agent` (or `source: backfill`).
 
-**Drafts are excluded from every retrieval path.** The brief skips them. `/brief` skips them. No skill, hook, or subagent may ever remove that tag — promotion is a human action, always, without exception.
+**Drafts are excluded from every retrieval path.** The brief skips them. `/brief`, `/why`, and `/spec` skip them. No skill, hook, or subagent may ever remove that tag — promotion is a human action, always, without exception.
 
 This one rule is what makes automatic capture safe. Without it, auto-capture poisons the vault within a month, and a memory you cannot trust is worse than no memory at all, because it is confidently wrong.
+
+**What counts as a draft** is decided the way Obsidian decides it: `tl/draft` in the frontmatter `tags` in any form — `- tl/draft`, `- "tl/draft"`, `[tl/draft]` — or `#tl/draft` written inline in the body, outside code. The Needs Review queue and the SessionStart brief apply the same test, so they cannot disagree about a note.
+
+### Promoting a draft
+
+A short read and a few property edits, done in Obsidian:
+
+1. **Read it and fix what is wrong.** Once promoted it is yours — correct the title, `affects`, `paths`, or the reasoning first.
+2. **Remove `tl/draft`** from `tags`.
+3. **Set `last_verified`** to today. Without it the note stays in [[Needs Review.base|Needs Review]], which keeps every unverified note older than seven days.
+4. **Promote what it hangs off.** A Decision or Gotcha reaches the brief only *through* a promoted Component in its `affects` — if that Component is still a draft, promote it first.
+5. **If it has `supersedes`,** open the Decision it names and set `status: superseded` and `superseded_by` to this note. Change nothing else on it. Skills deliberately leave this to you: until you promote the replacement, the old decision is still the one in force.
+
+Leave `source` as it is. Provenance records who *wrote* the note, not who approved it.
+
+**Dropping a draft** is deleting the note.
+
+Obsidian's Properties panel rewrites list properties as one item per line when you edit them. That is fine — retrieval reads both shapes.
 
 ---
 
@@ -73,7 +91,7 @@ Every note records where it came from: `human`, `agent`, or `backfill`. You can 
 
 ## The one ritual
 
-Open [[Needs Review.base|Needs Review]] once a week and clear it. Promote the drafts worth keeping, delete the rest, re-verify what the auditor flagged.
+Open [[Needs Review.base|Needs Review]] once a week and clear it. Promote the drafts worth keeping, delete the rest, re-verify what the auditor flagged. With the plugin, run `/throughline:week` first — it gives every draft a keep-or-drop call and points at the auditor's findings, which live in [[Audit Log]] rather than in the queue, because the auditor never tags a note.
 
 That is the entire maintenance burden. One ritual is sustainable. Five are not.
 

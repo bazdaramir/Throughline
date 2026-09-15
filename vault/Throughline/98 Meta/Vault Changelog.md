@@ -3,13 +3,118 @@ type: hub
 status: active
 project: global
 created: 2026-08-13
-updated: 2026-09-02
+updated: 2026-09-15
 source: human
 ---
 
 # Vault Changelog
 
 Versioned record of what changed in the vault, and — more importantly — **every place the shipped vault departs from the blueprint specification, with the reason.** Nothing is dropped silently.
+
+---
+
+## v0.1.6 — 2026-09-15 — The quarantine holds, and the brief reads what Obsidian writes
+
+No new skill, hook, subagent, note type, template, or dashboard. This pass came out of a full audit
+that reproduced each defect before fixing it and re-ran the reproduction afterwards. Plugin version
+0.3.0 → 0.3.1, so an installed copy picks up the hook fixes on update.
+
+**The quarantine could be bypassed.** `bin/tl-brief` recognised a draft only when the tag was an
+unquoted block-list item (`  - tl/draft`). The same draft tagged `tags: [tl/draft]` — the exact
+shape `skills/debrief` printed in its own contract — or `- "tl/draft"` reached the SessionStart brief
+as an open gotcha, while Needs Review listed it, correctly, as a draft. The brief now decides the way
+Obsidian does: `tl/draft` in frontmatter `tags` in any YAML shape, or `#tl/draft` inline in the body
+outside code. With one definition, the queue and the brief cannot disagree about a note.
+
+**Editing a note in Obsidian could silently remove it from retrieval.** The brief read `paths`,
+`affects`, and `open_threads` only as one-line lists. Obsidian's Properties panel writes lists one
+item per line — including on the edit that removes `tl/draft`, which made promotion the moment a
+note was most likely to vanish from the brief. Both shapes, quoted or bare, now read identically, as
+do CRLF files — in which a strict awk found no frontmatter at all — and files that open with the
+byte-order mark Windows PowerShell 5.1 writes. Non-ASCII file names are no longer octal-escaped by
+git before matching, which meant a `paths` entry containing one could never match.
+
+**One session end could start an endless chain of distillations.** Hooks fire inside `claude -p` as
+anywhere else — confirmed on the build machine — so the headless distiller's own SessionEnd ran
+`bin/tl-session-end` again, and a distiller's transcript clears both guards. Each run would distil
+the previous one for as long as the repository stayed dirty. The distiller now runs with
+`THROUGHLINE_DISTILLING` set, and both hooks stand down when they see it.
+
+**The distiller had an unrestricted shell.** It reads a transcript that may hold anything a session
+read, with nobody watching. It now gets Read, Write, Glob, and Grep; the hook gathers branch, date,
+local UTC offset, changed files, and recent commits into the prompt — the offset because transcript
+timestamps are UTC, and a Session filename is local time — which also says the transcript is
+material to summarise, never instructions to follow. It is told never to overwrite an existing
+Session note. **Not yet re-run against a live model** — the CLI login on the build machine had
+expired. A stub test covers the launch; the prompt change needs one live run.
+
+**A fresh clone failed its own validation on Windows.** Git for Windows defaults to
+`core.autocrlf=true`, so notes checked out as CRLF and `tools/tl-validate` reported all 32 as having
+no frontmatter. `.gitattributes` now pins `*.md` and `*.base` to LF, and the brief and the validator
+tolerate CRLF regardless.
+
+**`tools/tl-validate` could see none of this.** Its quarantine check grepped `tl-brief` for the
+string `tl/draft` — which also appears in a comment — and passed with every defect above in place.
+It now runs the real hooks against a disposable fixture. The brief's output must match the README
+example exactly. The draft must stay out under each tagging shape, with a control proving the tag is
+what excludes it. Obsidian-style lists, CRLF, and a byte-order mark must change nothing. A stub CLI
+proves one session end spawns one distiller, without a shell. The vault checks grew into the
+contracts retrieval silently depends on: status per type, folder per type and project, required
+properties, `affects` naming a Component, supersession recorded on both notes, `.base#View` embeds,
+and the closed tag list — a misspelt `tl/drafts` quarantines nothing. Every new check was made to
+fail first: against the v0.1.5 hook scripts it reports seven failures.
+
+**A draft could demote a promoted decision.** `/throughline:decide` marked the predecessor
+`superseded` the moment it wrote the new, quarantined Decision. Until promotion the area had no
+governing decision in the brief at all, and a dropped draft left the predecessor superseded by a
+note that no longer existed. The draft now only proposes the supersession with `supersedes`; the
+human completes it on promotion. `why`, `week`, `debrief`, and the auditor's check 3 follow, and the
+validator flags a supersession left half done.
+
+**Promotion was never defined.** "Delete the tag" was the whole instruction. But a promoted note
+without `last_verified` stays in Needs Review indefinitely, a Decision attached to a still-draft
+Component never reaches the brief, and a supersession needs completing. [[How Throughline Works]]
+now carries the checklist; the README, `help`, `week`, [[Home]], and START HERE point at it, the
+`G-0003` draft example describes promotion the same way, and all of them describe the weekly ritual
+alike — `/throughline:week` for the recommendations, Needs Review for the edits.
+
+**Smaller repairs.**
+
+- The worked example taught the forbidden behaviour: `C-0003`'s callout said it had been "flagged by
+  the auditor" and tagged. A human tagged it; the auditor only reports. The [[Audit Log]] no longer
+  says findings reach Needs Review — with no tags applied, they cannot.
+- `map` stopped whenever any Component covered the target, which made its own `parent` step
+  unreachable: the shipped `C-0002 Session store`, inside `C-0001 Auth subsystem`'s `src/auth/`,
+  could not have been written by it. Same ground stops; strictly inside is a child. `paths` entries
+  are documented as prefixes, never globs.
+- The backfiller was told `affects` must point at Components it created, contradicting `init`'s
+  advice to map one first so it has something to attach to. It now reuses existing Components and
+  never maps over their ground, and fewer than ten notes triggers one re-scan instead of pressure to
+  write notes the history does not support.
+- `init` accepts `--vault <path>`. A variable in a shell profile is invisible to Claude Code started
+  from PowerShell or the desktop app, which left Windows users at "No vault found". Both hooks now
+  also accept quoted values in `.throughline`, which failed silently.
+- `THROUGHLINE_LOG` makes the silent SessionEnd hook explain itself without editing the installed
+  plugin, and the README gained a Troubleshooting section.
+- The README architecture diagram showed the capture skills writing straight into the vault, past
+  the quarantine.
+- Two example dates contradicted their own notes: `D-0001` was verified four months before it was
+  created, and `G-0002` expired the day before it was created. Neither date now precedes `created`,
+  and both notes still sit in the queue for the reason their callouts give.
+- [[Note Types Reference]] names the one sanctioned link from knowledge back to a Session
+  (`evidence`), and [[VERIFY]] lost a machine-specific path and lists what now runs automatically.
+
+### Deliberately not changed
+
+- The two-hook and twelve-skill constraints, the SessionStart output format, `source:` semantics,
+  the auditor's read-only guarantee, and the Session-notes-are-evidence rule from v0.1.4.
+- The `.base` files are byte-identical. Showing `source` or draft state in the Decisions and Gotchas
+  views would help a human tell a draft from a promoted note, but rendering cannot be verified
+  headlessly, so it stays an idea rather than a guess.
+- The brief still matches by path prefix, reads the working tree and the last three commits, and
+  looks for `.throughline` only in the directory Claude Code starts in.
+- `/throughline:gotcha` still increments `recurrence` on an existing Gotcha: a counter the user
+  triggers by reporting the same symptom again, and nothing retrieval reads.
 
 ---
 

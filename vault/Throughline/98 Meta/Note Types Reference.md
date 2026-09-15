@@ -24,7 +24,9 @@ updated:     # YYYY-MM-DD
 source:      # human | agent | backfill   ← provenance. Non-negotiable.
 ```
 
-One further optional property is universal: `last_verified: YYYY-MM-DD` — the last time a human confirmed this note still matches reality. The hygiene queue uses it.
+One further optional property is universal: `last_verified: YYYY-MM-DD` — the last time a human confirmed this note still matches reality. The hygiene queue uses it, and setting it is part of promoting a draft. No skill, hook, or subagent ever writes it.
+
+List-valued properties (`paths`, `affects`, `touched`, `open_threads`, `tags`, …) may be written inline — `affects: ["[[C-0002 Session store]]"]` — or one item per line, which is what Obsidian's Properties panel writes. Both mean the same thing to every part of the system.
 
 ## The seven types at a glance
 
@@ -74,7 +76,7 @@ Enforced by templates, checked by the auditor. Each direction is a query somethi
 | Decision | Decision it supersedes | `supersedes` |
 | Any note | Domain terms used | inline wikilink, e.g. [[T Settlement window]] |
 
-**Forbidden:** linking every note to everything (a dense graph carries no information); links purely for "relatedness"; and **links from permanent notes back to Sessions** — sessions are evidence, links flow *from* sessions *to* knowledge, never back.
+**Forbidden:** linking every note to everything (a dense graph carries no information); links purely for "relatedness"; and **links from permanent notes back to Sessions** — sessions are evidence, links flow *from* sessions *to* knowledge, never back. The one exception is a Decision's `evidence`, which may cite the Session it was made in: that is provenance, not relatedness.
 
 ## The eleven tags. There will not be more.
 
@@ -82,7 +84,7 @@ Enforced by templates, checked by the auditor. Each direction is a query somethi
 
 Frontmatter properties do the heavy lifting. Tags exist only for cross-cutting dimensions a property cannot express. Tag proliferation is the classic way PKM systems die: every extra tag is a decision at capture time, and decisions at capture time are what kill capture.
 
-**`#tl/draft` is the most important tag in the system** — it is the quarantine that makes automatic capture safe.
+**`#tl/draft` is the most important tag in the system** — it is the quarantine that makes automatic capture safe. It counts wherever Obsidian would count it: in frontmatter `tags` in any form, or inline in the body outside code. A misspelling (`tl/drafts`) quarantines nothing, which is one reason the list above is closed. Removing it is one step of [[How Throughline Works#Promoting a draft|promoting a draft]].
 
 ## Naming rules
 

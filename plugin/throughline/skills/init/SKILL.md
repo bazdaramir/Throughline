@@ -1,7 +1,7 @@
 ---
 name: init
 description: Make the current repository Throughline-aware — resolve the vault, write the .throughline pointer file, and create the project partition. Use once per repo, or when a Throughline command reports the repo is not initialised.
-argument-hint: "[project-slug]"
+argument-hint: "[project-slug] [--vault <path>]"
 ---
 
 # Throughline · init
@@ -13,15 +13,20 @@ Target: under sixty seconds.
 
 **Resolve the vault**, in this order — never guess a path:
 
-1. `$THROUGHLINE_VAULT` (`%THROUGHLINE_VAULT%` on Windows)
-2. the `vault:` line in `./.throughline`, if the file already exists
-3. `~/Throughline`
+1. the path given with `--vault <path>`
+2. `$THROUGHLINE_VAULT` (`%THROUGHLINE_VAULT%` on Windows)
+3. the `vault:` line in `./.throughline`, if the file already exists
+4. `~/Throughline`
+
+`--vault` exists because an environment variable is easy to set where Claude Code never sees it — a
+shell profile is not read when Claude Code starts from PowerShell or the desktop app. Once the path
+is in `.throughline`, both hooks read it from there and no variable is needed.
 
 A directory is a valid vault only if it contains `00 Command/` and `90 Templates/`. If none
 resolve, say this and stop:
 
-> No Throughline vault found. Point `THROUGHLINE_VAULT` at your vault directory (the folder
-> containing `00 Command/`), then run `/throughline:init` again.
+> No Throughline vault found. Run `/throughline:init --vault <path>` with the folder that contains
+> `00 Command/`, or point `THROUGHLINE_VAULT` at it.
 
 **Do not create a vault.** The vault ships with the product; inventing one produces a broken
 half-vault with no templates or dashboards.
@@ -30,7 +35,8 @@ half-vault with no templates or dashboards.
 
 1. **If `./.throughline` already exists** — read it, confirm the project and vault it names still
    resolve, print the confirmation, and stop. This skill is idempotent; running it twice changes
-   nothing.
+   nothing. If `--vault` names a different vault, say so and tell the user to edit the `vault:` line
+   by hand — never rewrite the file.
 
 2. **Determine the project slug**, in order:
    - the argument, if given
@@ -88,7 +94,12 @@ half-vault with no templates or dashboards.
    ```
 
    Always write the `vault:` line explicitly. The `~/Throughline` fallback is frequently wrong —
-   the vault often lives elsewhere — and a wrong fallback fails silently later.
+   the vault often lives elsewhere — and a wrong fallback fails silently later. Write the path
+   unquoted, with forward slashes on Windows (`C:/Users/...`), which every shell reads.
+
+   The hooks give `$THROUGHLINE_VAULT` precedence over this line. If the variable is set and names a
+   different vault, say so in the output — otherwise the brief will read a vault the user did not
+   just choose.
 
 7. **Offer the `CLAUDE.md` conversion. Never apply it.** If `./CLAUDE.md` exists and is longer than
    ~50 lines, show the router it *could* become and ask whether to write it. If the user does not

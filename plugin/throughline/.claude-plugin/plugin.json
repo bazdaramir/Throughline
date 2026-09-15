@@ -1,7 +1,7 @@
 {
   "name": "throughline",
   "description": "Engineering memory for AI-assisted development. Captures decisions, gotchas, and session outcomes automatically; retrieves the relevant slice into every session.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "author": {
     "name": "Amirhossein Bazdar"
   },

@@ -12,7 +12,7 @@ source: human
 *Engineering memory for AI-assisted development.* Your agent forgets everything. This is where what you decided stays decided.
 
 > [!tip] The only rule
-> You are never asked to write documentation. Capture happens as a by-product of work. **Your one ritual is to clear [[#⚠ Needs your attention]] once a week.** One ritual is sustainable. Five are not.
+> You are never asked to write documentation. Capture happens as a by-product of work. **Your one ritual is to clear [[#⚠ Needs your attention]] once a week** — `/throughline:week` gives every draft a keep-or-drop call first. One ritual is sustainable. Five are not.
 
 ---
 
@@ -20,7 +20,7 @@ source: human
 
 - [ ] Run `/throughline:init` in a repo
 - [ ] Run `/throughline:backfill --since 90d`
-- [ ] Promote or drop the drafts in **Needs your attention** below
+- [ ] Promote or drop the drafts in **Needs your attention** below — [[How Throughline Works#Promoting a draft|what promoting involves]]
 - [ ] Start a Claude Code session and read the brief
 - [ ] Capture one thing today: `/throughline:decide` or `/throughline:gotcha`
 
