@@ -135,12 +135,13 @@ is knowledge, so it is quarantined. The distiller is itself a Claude Code sessio
 would start another distillation, indefinitely. It also gets no shell: it reads a transcript that may
 contain anything, with nobody watching, so the hook gathers the git facts and hands them over.
 
-**Once a week.** Run `/throughline:week` for a keep-or-drop call on every draft, then open
-`Needs Review` in Obsidian and act on it. Promoting a draft is a handful of property edits — remove
-`tl/draft`, set `last_verified`, and complete any supersession it proposes — listed in
+**Once a week.** Run `/throughline:week` for a keep-or-drop call on every draft, then promote the
+keepers with `tl-promote` — a shell command, run by you in your own terminal. It shows the exact
+edit, a few lines, and asks; it changes nothing until you answer `y` at a terminal, so an agent can
+preview a promotion but never make one. `tl-promote --review` walks the whole queue, Components
+first. Dropping a draft is deleting it. That is the entire maintenance burden. One ritual is
+sustainable; five are not. The by-hand steps are in
 [How Throughline Works](vault/Throughline/98%20Meta/How%20Throughline%20Works.md#promoting-a-draft).
-Dropping one is deleting it. That is the entire maintenance burden. One ritual is sustainable; five
-are not.
 
 ## Key features
 
@@ -149,6 +150,9 @@ are not.
 - **2 subagents** — `throughline-auditor` (read-only decay detection) and `throughline-backfiller`
   (reconstructs a vault from git history, so it starts full instead of empty)
 - **2 hooks** — `SessionStart` context brief, `SessionEnd` distillation. No others, deliberately.
+- **`tl-promote`** — the human end of the quarantine: lists drafts, previews the exact edit, and
+  promotes only with a person at a terminal. Deterministic `sh`/`awk`, no model call, and every
+  promotion is recorded in an append-only Promotion Log.
 - **7 note types** — decision, component, gotcha, session, spec, term, practice. Reached by
   subtraction from an initial fourteen; every type that could not justify a distinct retrieval query
   was merged or cut.
@@ -165,6 +169,7 @@ plugin/throughline/               the Claude Code plugin
   .claude-plugin/plugin.json      plugin manifest
   bin/tl-brief                    SessionStart brief — deterministic, no model call
   bin/tl-session-end              SessionEnd distillation trigger — detached spawn
+  bin/tl-promote                  promote drafts: list, preview, apply — human at a terminal only
   hooks/hooks.json                exactly two hooks
   skills/                         12 skills, one SKILL.md each
   agents/                         2 subagent definitions
@@ -175,9 +180,11 @@ vault/Throughline/                the hub vault — one vault, all projects, one
   02 Domain/  03 Practices/       domain vocabulary and earned rules, shared across projects
   04 Briefs/                      generated context packets — derived, gitignored
   90 Templates/                   the 7 note templates
-  98 Meta/                        how it works, note reference, changelog, audit log, VERIFY
-tools/tl-validate                 validation gate: static contracts plus hook behaviour
-docs/  starter/  lite/            reserved and empty — see Current status
+  98 Meta/                        how it works, note reference, changelog, audit and promotion
+                                  logs, VERIFY
+tools/tl-validate                 validation gate: static contracts plus hook and promotion behaviour
+docs/ROADMAP.md                   what is being built now, next, later — and what was rejected
+starter/  lite/                   reserved and empty — see Current status
 ```
 
 ## Getting started
@@ -233,8 +240,17 @@ joins against:
 
 The Component note it writes is a quarantined draft, like every knowledge note Throughline writes,
 and every Decision and Gotcha reaches the brief *through* a Component. So the brief stays silent
-until you open that note in Obsidian, check its `paths` and invariants, remove `tl/draft`, and set
-`last_verified` — the promotion steps in
+until you promote it. Read the note in Obsidian first — check its `paths` and invariants — then, in
+your own terminal at the repository root:
+
+```bash
+sh "/path/to/plugin/throughline/bin/tl-promote"            # list the drafts
+sh "/path/to/plugin/throughline/bin/tl-promote" C-0001     # preview the edit, then answer y
+```
+
+`/throughline:help` prints the exact path of the installed copy. Promotion removes `tl/draft`, sets
+`last_verified`, and — for a Decision that replaces another — marks the old one superseded; nothing
+else changes. The steps by hand are in
 [How Throughline Works](vault/Throughline/98%20Meta/How%20Throughline%20Works.md#promoting-a-draft).
 
 The vault is fully usable without the plugin — open `90 Templates/` and write a note by hand. The
@@ -285,7 +301,9 @@ sh /absolute/path/to/Throughline/plugin/throughline/bin/tl-brief
 No output means one of these, most likely first:
 
 - no *promoted* Component has a `paths` entry that prefixes a changed file. Drafts are invisible to
-  retrieval, and entries are repo-relative prefixes such as `src/auth/` — never globs.
+  retrieval, and entries are repo-relative prefixes such as `src/auth/` — never globs. Run
+  `tl-promote` (see Getting started, step 4) to see whether drafts are waiting on you; a freshly
+  mapped Component always is.
 - nothing changed: the brief reads the working tree and the last three commits.
 - the vault does not resolve: check `$THROUGHLINE_VAULT` as Claude Code sees it, then the `vault:`
   line in `.throughline`.
@@ -327,12 +345,26 @@ It needs `sh`, `awk`, `git`, and `node`, runs every check, and exits non-zero if
   character. Outside a Throughline repository the brief must be silent. Finally
   `bin/tl-session-end` runs with a stub standing in for the `claude` CLI — no model is ever called —
   and one session end must spawn exactly one distiller, with no shell.
+- *Promotion.* `bin/tl-promote` runs against the same fixture. Listing and previewing must change
+  nothing, and a piped `y` with no terminal must promote nothing. A promotion must change exactly the
+  draft tag and `last_verified` — compared line by line against the shipped note — after which the
+  brief must retrieve the note, the vault must still satisfy every contract above, and the
+  Promotion Log must gain one line. Six ways of writing the tag must all promote and then be
+  retrieved; an inline body tag, a tags list it cannot rewrite exactly, and an edit that would leave
+  a draft must all be refused with the vault untouched. A Decision that supersedes another must
+  complete the supersession on the predecessor and nothing else, and leave a draft predecessor
+  alone. A CRLF note with a byte-order mark must keep both, and `--review` must walk Components
+  first.
 
 Every check was made to fail before it was trusted. Against the original hook scripts the validator
 reports the three quarantine leaks, the dropped block lists, the CRLF failure, the runaway
 distillation, and the shell. Injected vault defects — a misnamed view, a misspelt tag, an invalid
 status, a misfiled note, a non-Component `affects`, a draft successor, an unfinished supersession,
 an empty `paths`, an invalid `source`, a project that does not match its folder — are each reported.
+The promotion checks were exercised the same way, on copies of `tl-promote`: removing the terminal
+guard, making it rewrite `updated:` without saying so, and dropping its binary-mode reads each make
+the gate fail. (That last one is a real trap: gawk on Windows silently drops the CR from CRLF files,
+which would turn a CRLF note into an LF one.) Not every promotion check has had that treatment.
 
 **Manifest validation — first-party tooling.** `claude plugin validate .` and
 `claude plugin validate plugin/throughline` both pass. `claude plugin details throughline` reports
@@ -357,7 +389,12 @@ a distiller that chooses to emit draft notes — that path is covered by the stu
   the constraints written into each `SKILL.md`; there is no automated test that a model honours
   them. They have been exercised interactively, not systematically.
 - **There is no test suite in the conventional sense** — no unit tests, no CI. `tools/tl-validate`
-  exercises the hooks end to end on one fixture; it is a gate, not a substitute for a suite.
+  exercises the hooks and `tl-promote` end to end on one fixture; it is a gate, not a substitute for
+  a suite.
+- **`tl-promote`'s terminal guard stops accidents, not attackers.** It means Claude Code's Bash tool
+  can preview a promotion but not apply one, and an agent that pipes `y` still promotes nothing. An
+  agent that is simply allowed to edit a file can still change a note's text, including its tags;
+  what stops that is the prompt contracts, which are not machine-tested.
 - **Tested on one machine:** Windows 11 with Git Bash, Obsidian 1.13.7. The CRLF check forces gawk
   into binary mode so that it reads files the way Linux and macOS awks do, the brief's parser was
   also run under `gawk --posix`, and the whole gate — both hooks included — passes under `dash`,
@@ -370,17 +407,18 @@ Prototype. Phases 1–3 are complete and the system runs end to end.
 **Implemented**
 
 - The vault: 7 note types, 7 templates, 7 Bases dashboards, hub notes, and a worked example
-- The plugin: 12 skills, 2 subagents, 2 hooks, and both hook scripts
+- The plugin: 12 skills, 2 subagents, 2 hooks, both hook scripts, and `tl-promote`
 - Marketplace manifest — installable, and verified locally
-- `tools/tl-validate` — static contracts plus hook behaviour on a disposable fixture
+- `tools/tl-validate` — static contracts plus hook and promotion behaviour on a disposable fixture
+- [`docs/ROADMAP.md`](docs/ROADMAP.md) — what is being built now, next, later, and what was rejected
 
 **Deliberately deferred**
 
-- `docs/` — quickstart, manual, and methodology write-ups
+- `docs/` beyond the roadmap — quickstart, manual, and methodology write-ups
 - `starter/` — the 14 non-skill workflows as copy-paste prompts
 - `lite/` — a reduced free tier
 
-These three directories are empty on purpose rather than abandoned. The
+`starter/` and `lite/` are empty on purpose rather than abandoned. The
 [Workflow Cheat Sheet](vault/Throughline/98%20Meta/Workflow%20Cheat%20Sheet.md) lists all 26
 designed workflows and marks which twelve ship as skills; the other fourteen stay as documented
 prompts until real usage shows which deserve promotion. That is deliberate — the next version's
@@ -388,24 +426,12 @@ roadmap gets written by observing usage instead of guessing.
 
 ## Roadmap
 
-Future work, in rough order of expected value. None of it is started.
-
-- **W10 Gotcha Guard** — a warning before you edit a file with an open gotcha on it. Designed, and
-  deliberately unbuilt: it needs a third hook, and the two-hook constraint is load-bearing until
-  there is evidence a third earns its keep.
-- **W23 Post-Incident Capture** — an incident timeline distilled into gotchas.
-- **The remaining 14 workflows** as copy-paste prompts in `starter/`.
-- **Semantic retrieval.** The current brief is exact path matching, which is why it is trustworthy
-  and also why it misses a decision recorded against a since-renamed directory. Embeddings would
-  improve recall at the cost of the "cannot invent a decision you never made" guarantee. If it is
-  ever built it belongs *beside* the deterministic brief as an opt-in second pass, never replacing
-  it.
-- **Cross-project practice extraction** — recurring gotchas graduating into shared Practices
-  automatically rather than by hand.
-- **Validating any vault.** `tools/tl-validate` checks the vault inside this repository. The same
-  contract checks pointed at a user's own vault would catch a hand edit that silently takes a note
-  out of retrieval — a misfiled Gotcha, an unknown status — before the missing brief does.
-- **Multi-machine vault sync**, which today is whatever the user already uses for the folder.
+The living roadmap — **now, next, later, experimental, and rejected with reasons** — is
+[`docs/ROADMAP.md`](docs/ROADMAP.md). In short: the review loop is the product's bottleneck, so
+that comes first (`tl-promote` is the first piece); then making the silent brief explain itself,
+CI to turn "tested on one machine" into evidence, and validating a user's own vault. Semantic
+retrieval, if it is ever built, belongs *beside* the deterministic brief as an opt-in second pass,
+never replacing it.
 
 ## Authorship
 

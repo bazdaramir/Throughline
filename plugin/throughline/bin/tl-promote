@@ -1,0 +1,588 @@
+#!/bin/sh
+# tl-promote - the human end of the draft quarantine.
+#
+# Everything Throughline writes about a project starts as a quarantined draft
+# that no retrieval path will touch. Promotion is the one act that makes a draft
+# trustworthy, so it is a human act. This command makes that act cheap without
+# making it automatic.
+#
+#   tl-promote              list the drafts awaiting review
+#   tl-promote <ref>        show exactly what promoting one note would change;
+#                           at a terminal, ask, and do it
+#   tl-promote --review     walk through every draft in order (terminal only)
+#
+# <ref> is a note id (D-0004), its exact title, or a unique piece of the title.
+# Run it from the root of a repository that /throughline:init has set up.
+#
+# HARD RULES:
+#   - Nothing changes unless a human answers y at a terminal. Without one, as in
+#     Claude Code's Bash tool, the command can only preview. That is the point:
+#     an agent can show you the change, and only you can make it.
+#   - It edits only what promotion means: it removes tl/draft, sets
+#     last_verified, and - when the note says it supersedes a Decision -
+#     completes that supersession on the predecessor (status, superseded_by).
+#     Every other byte is preserved, including line endings and a BOM.
+#   - It refuses rather than guesses: a tag in an odd place, a tags layout it
+#     cannot rewrite exactly, or an edit that would still leave the note a draft.
+#   - It never deletes, renames, or creates a knowledge note. Dropping a draft
+#     is deleting the file, and that stays yours.
+#
+# WHAT COUNTS AS A DRAFT is the definition tl-brief applies, so the two cannot
+# disagree. The validator proves it by promoting a note and checking that the
+# brief then retrieves it.
+#
+# Exit codes: 0 listed, previewed, promoted, or declined   1 cannot run here
+#             2 reference not found or ambiguous           3 not a draft
+#             4 cannot be promoted safely (a message says why)
+#
+# TL_PROMOTE_TEST_ASSUME_TTY=1 skips the terminal check. It exists so the test
+# suite can answer the prompt from a pipe. It is not a supported way to promote
+# non-interactively, and the README does not mention it.
+
+set -u
+
+US=$(printf '\037')                     # field separator; cannot occur in a title
+NL='
+'
+BOM=$(printf '\357\273\277')
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+
+err() { printf 'tl-promote: %s\n' "$*" >&2; }
+die() { c=$1; shift; err "$*"; exit "$c"; }
+
+usage() {
+  cat <<EOF
+usage: tl-promote                list drafts awaiting review
+       tl-promote <ref>          preview, and at a terminal apply, one promotion
+       tl-promote --review       walk through every draft (terminal only)
+
+<ref> is a note id such as D-0004, its exact title, or a unique piece of it.
+EOF
+}
+
+# --------------------------------------------------------------- arguments ---
+review=0; ref=''
+for a in "$@"; do
+  case "$a" in
+    -h|--help) usage; exit 0 ;;
+    --review)  review=1 ;;
+    -*)        usage >&2; die 1 "unknown option $a" ;;
+    *)         [ -z "$ref" ] || die 1 "one note at a time (got '$ref' and '$a')"; ref=$a ;;
+  esac
+done
+[ "$review" = 0 ] || [ -z "$ref" ] || die 1 "--review takes no note; it walks them all"
+
+# ------------------------------------------------------------------ config ---
+[ -f ./.throughline ] || die 1 "no .throughline here. Run it from the root of a repository set up with /throughline:init."
+
+tlconf() {
+  sed -n "s/^$1:[[:space:]]*//p" ./.throughline 2>/dev/null | head -1 | tr -d '\r' \
+    | sed -e 's/[[:space:]]*$//' -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/"
+}
+
+proj=$(tlconf project)
+[ -n "$proj" ] || die 1 ".throughline names no project"
+vault="${THROUGHLINE_VAULT:-}"
+[ -n "$vault" ] || vault=$(tlconf vault)
+[ -n "$vault" ] || vault="$HOME/Throughline"
+case "$vault" in
+  '~/'*) vault="$HOME/${vault#\~/}" ;;
+  '~')   vault="$HOME" ;;
+esac
+[ -d "$vault/00 Command" ] || die 1 "no Throughline vault at $vault"
+pdir="$vault/01 Projects/$proj"
+[ -d "$pdir" ] || die 1 "no project partition at $pdir - run /throughline:init"
+
+is_tty() { [ -n "${TL_PROMOTE_TEST_ASSUME_TTY:-}" ] || { [ -t 0 ] && [ -t 1 ]; }; }
+
+cleanup() { find "$pdir" -name ".tl-promote-$$.*" -exec rm -f {} + 2>/dev/null; }
+trap cleanup EXIT
+trap 'cleanup; exit 1' INT TERM
+
+# ------------------------------------------------------ reading the vault ---
+# One awk pass over every Component, Decision, Gotcha and Spec. It reads
+# frontmatter exactly as tl-brief does: flow and block lists, quoted or bare
+# items, CRLF, a BOM. One record per note, fields separated by $US.
+AWK_SCAN='
+BEGIN {
+  LIST["paths"] = LIST["affects"] = LIST["tags"] = LIST["tag"] = LIST["supersedes"] = 1
+  OFS = "\037"; GS = "\034"
+}
+function base(p,   n, a) { n = split(p, a, "/"); p = a[n]; sub(/\.md$/, "", p); return p }
+function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+function unquote(s,   c) {
+  s = trim(s); c = substr(s, 1, 1)
+  if (length(s) >= 2 && (c == "\"" || c == Q) && substr(s, length(s), 1) == c) s = substr(s, 2, length(s) - 2)
+  return s
+}
+function add(k, v) {
+  v = unquote(v)
+  if (k == "affects" || k == "supersedes") { sub(/^\[+/, "", v); sub(/\]+$/, "", v); sub(/[|#].*$/, "", v); v = base(trim(v)) }
+  else if (k == "paths") { sub(/^\.\//, "", v); sub(/^\//, "", v) }
+  if (v != "") val[k] = (val[k] == "") ? v : val[k] GS v
+}
+function flowlist(k, s,   i, c, q, item) {
+  s = trim(s); sub(/^\[/, "", s); sub(/\][ \t]*$/, "", s)
+  q = ""; item = ""
+  for (i = 1; i <= length(s); i++) {
+    c = substr(s, i, 1)
+    if (q != "")                                        { if (c == q) q = "" }
+    else if ((c == "\"" || c == Q) && trim(item) == "") { q = c }
+    else if (c == ",")                                  { add(k, item); item = ""; continue }
+    item = item c
+  }
+  add(k, item)
+}
+function scalar(k, v) {
+  sub(/[ \t]+#.*$/, "", v); v = unquote(v)
+  if (k == "status") status = v; else if (k == "source") source = v
+  else if (k == "confidence") conf = v; else if (k == "created") created = v
+}
+function drafted(   n, a, i) {
+  n = split(val["tags"] GS val["tag"], a, GS)
+  for (i = 1; i <= n; i++)
+    if (a[i] ~ /^#?tl\/draft(\/|[^A-Za-z0-9_-]|$)/ || a[i] ~ /[^A-Za-z0-9_\/-]#?tl\/draft(\/|[^A-Za-z0-9_-]|$)/) draft = 1
+  return draft
+}
+function swap(s, to) { gsub(GS, to, s); return s }
+function flush() {
+  if (f == "") return
+  print f, (drafted() ? 1 : 0), source, conf, created, status, swap(val["affects"], ";"), swap(val["supersedes"], ";"), inline, tagsbad, says, swap(val["paths"], ", ")
+}
+FNR == 1 {
+  flush()
+  f = FILENAME; draft = 0; infm = 0; fence = 0; key = ""; inflow = 0
+  source = conf = created = status = ""; inline = ""; ninline = 0; tagsbad = 0; says = ""; want = 0
+  split("", val)
+  n = split(f, parts, "/"); dir = parts[n - 1]
+  heading = (dir == "Components") ? "What it does" : (dir == "Decisions") ? "Decision" : (dir == "Gotchas") ? "Symptom" : (dir == "Specs") ? "Objective" : ""
+}
+{ sub(/\r$/, "") }
+FNR == 1 && index($0, BOM) == 1 { $0 = substr($0, length(BOM) + 1) }
+FNR == 1 && /^---[ \t]*$/ { infm = 1; next }
+infm && /^---[ \t]*$/     { infm = 0; next }
+infm {
+  if ($0 ~ /^[A-Za-z_][A-Za-z0-9_-]*:/) {
+    key = $0; sub(/:.*/, "", key); inflow = 0
+    value = $0; sub(/^[^:]*:/, "", value); value = trim(value)
+    if (value == "") next
+    if (!(key in LIST)) scalar(key, value)
+    else if (substr(value, 1, 1) != "[") add(key, value)
+    else {
+      flowlist(key, value); inflow = (value !~ /\][ \t]*$/)
+      if (inflow && (key == "tags" || key == "tag")) tagsbad = 1
+    }
+  } else if (inflow) {
+    flowlist(key, $0); if ($0 ~ /\][ \t]*$/) inflow = 0
+  } else if (key in LIST && $0 ~ /^[ \t]*-([ \t]|$)/) {
+    value = $0; sub(/^[ \t]*-[ \t]*/, "", value); add(key, value)
+  }
+  next
+}
+/^[ \t]*(```|~~~)/ { fence = !fence; next }
+!fence {
+  line = $0; gsub(/`[^`]*`/, "", line)
+  if (line ~ /(^|[^A-Za-z0-9_\/&-])#tl\/draft(\/|[^A-Za-z0-9_-]|$)/) {
+    draft = 1; if (ninline < 3) { inline = inline (inline == "" ? "" : ",") FNR; ninline++ }
+  }
+  if (heading != "") {
+    if (want && $0 ~ /^#/)                         want = 0
+    else if (want && trim($0) != "" && $0 !~ /^[ \t]*<!--/) {
+      says = trim($0); gsub(/\*\*/, "", says); if (length(says) > 150) says = substr(says, 1, 147) "..."; want = 0
+    } else if ($0 == "## " heading)                want = 1
+  }
+}
+END { flush() }
+'
+
+# Promotion: drop tl/draft from tags/tag, set last_verified. Everything else is
+# printed exactly as read, with the line ending it came with. Every awk call here
+# runs with BINMODE=3: gawk on Windows otherwise reads in text mode and quietly
+# drops the CR, which would turn a CRLF note into an LF one on write. (Other awks
+# ignore the variable and read bytes as they are.)
+AWK_PROMOTE='
+function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+function unquote(s,   c) {
+  s = trim(s); c = substr(s, 1, 1)
+  if (length(s) >= 2 && (c == "\"" || c == Q) && substr(s, length(s), 1) == c) s = substr(s, 2, length(s) - 2)
+  return s
+}
+function isdraft(s) { s = unquote(s); return s ~ /^#?tl\/draft(\/|[^A-Za-z0-9_-]|$)/ }
+function emit(s) { printf "%s\n", s }
+function flushtags(   i, keep) {
+  if (!intags) return
+  keep = 0
+  for (i = 1; i <= nb; i++) if (kind[i] == "item") keep++
+  if (keep > 0) emit(holdline)
+  for (i = 1; i <= nb; i++) if (kind[i] != "gone" && (keep > 0 || kind[i] != "item")) emit(buf[i])
+  intags = 0; nb = 0
+}
+{
+  line = $0; cr = ""
+  if (line ~ /\r$/) { cr = "\r"; sub(/\r$/, "", line) }
+  pre = ""
+  if (NR == 1 && index(line, BOM) == 1) { pre = BOM; line = substr(line, length(BOM) + 1) }
+}
+NR == 1 {
+  if (line !~ /^---[ \t]*$/) { print "the note has no frontmatter" > "/dev/stderr"; bad = 1; exit 4 }
+  infm = 1; emit(pre line cr); next
+}
+infm && line ~ /^---[ \t]*$/ {
+  flushtags()
+  if (!lvdone) emit("last_verified: " DATE cr)
+  emit(line cr); infm = 0; closed = 1; next
+}
+infm {
+  if (line ~ /^[A-Za-z_][A-Za-z0-9_-]*:/) {
+    flushtags()
+    key = line; sub(/:.*/, "", key)
+    value = line; sub(/^[^:]*:/, "", value); value = trim(value)
+    if (key == "tags" || key == "tag") {
+      if (value == "") { intags = 1; holdline = line cr; nb = 0; next }
+      if (substr(value, 1, 1) == "[") {
+        if (value !~ /\][ \t]*$/) { print "a tags list that spans several lines" > "/dev/stderr"; bad = 1; exit 4 }
+        inner = value; sub(/^\[/, "", inner); sub(/\][ \t]*$/, "", inner)
+        n = 0; q = ""; item = ""; out = ""; kept = 0
+        for (i = 1; i <= length(inner) + 1; i++) {
+          c = (i <= length(inner)) ? substr(inner, i, 1) : ","
+          if (q != "") { if (c == q) q = ""; item = item c; continue }
+          if ((c == "\"" || c == Q) && trim(item) == "") { q = c; item = item c; continue }
+          if (c == ",") {
+            if (trim(item) != "" && !isdraft(item)) { out = out (kept ? ", " : "") trim(item); kept++ }
+            item = ""; continue
+          }
+          item = item c
+        }
+        if (kept > 0) emit(key ": [" out "]" cr)
+        next
+      }
+      if (!isdraft(value)) emit(line cr)
+      next
+    }
+    if (key == "last_verified") { emit("last_verified: " DATE cr); lvdone = 1; next }
+    emit(line cr); next
+  }
+  if (intags) {
+    nb++; buf[nb] = line cr
+    if (line ~ /^[ \t]*-([ \t]|$)/) {
+      item = line; sub(/^[ \t]*-[ \t]*/, "", item); sub(/[ \t]+#.*$/, "", item)
+      kind[nb] = isdraft(item) ? "gone" : "item"
+    } else kind[nb] = "other"
+    next
+  }
+  emit(line cr); next
+}
+{ emit(line cr) }
+END { if (!bad && !closed) { print "the frontmatter is never closed" > "/dev/stderr"; exit 4 } }
+'
+
+# Supersession: on the predecessor, status -> superseded and superseded_by -> the
+# promoted note. Nothing else about it changes - it is a historical record.
+AWK_SUPERSEDE='
+function emit(s) { printf "%s\n", s }
+{
+  line = $0; cr = ""
+  if (line ~ /\r$/) { cr = "\r"; sub(/\r$/, "", line) }
+  pre = ""
+  if (NR == 1 && index(line, BOM) == 1) { pre = BOM; line = substr(line, length(BOM) + 1) }
+}
+NR == 1 { if (line !~ /^---[ \t]*$/) exit 4; infm = 1; emit(pre line cr); next }
+infm && line ~ /^---[ \t]*$/ {
+  if (!bdone) emit("superseded_by: \"" LINK "\"" cr)
+  emit(line cr); infm = 0; closed = 1; next
+}
+infm && line ~ /^status:/        { emit("status: superseded" cr); sdone = 1; next }
+infm && line ~ /^superseded_by:/ { emit("superseded_by: \"" LINK "\"" cr); bdone = 1; next }
+{ emit(line cr) }
+END { if (!closed || !sdone) exit 4 }
+'
+
+scan_rows() {
+  find "$pdir" -type f -name '*.md' \
+    \( -path '*/Components/*' -o -path '*/Decisions/*' -o -path '*/Gotchas/*' -o -path '*/Specs/*' \) -print0 2>/dev/null \
+    | xargs -0 awk -v BINMODE=3 -v Q="'" -v BOM="$BOM" "$AWK_SCAN" 2>/dev/null | LC_ALL=C sort
+}
+
+scan_file() { awk -v BINMODE=3 -v Q="'" -v BOM="$BOM" "$AWK_SCAN" "$1" 2>/dev/null; }
+
+# ------------------------------------------------------------- small helpers ---
+note_name() { n=${1##*/}; printf '%s' "${n%.md}"; }
+note_id()   { n=$(note_name "$1"); case "$n" in [CDGS]-[0-9]*) printf '%s' "${n%% *}" ;; *) printf '%s' "$n" ;; esac; }
+note_title() {
+  n=$(note_name "$1")
+  case "$n" in [CDGS]-[0-9]*" "*) printf '%s' "${n#* }" ;; *) printf '%s' "$n" ;; esac
+}
+clip() { # clip <width> <text>
+  if [ "${#2}" -gt "$1" ]; then printf '%s...' "$(printf '%s' "$2" | cut -c1-$(($1 - 3)))"; else printf '%s' "$2"; fi
+}
+lower() { printf '%s' "$1" | tr 'A-Z' 'a-z'; }
+
+ROWS=''; DRAFT_NAMES=''
+load() {
+  ROWS=$(scan_rows); DRAFT_NAMES=''
+  while IFS=$US read -r r_path r_draft _; do
+    [ -n "$r_path" ] && [ "$r_draft" = 1 ] && DRAFT_NAMES="$DRAFT_NAMES$(note_name "$r_path")$NL"
+  done <<EOF
+$ROWS
+EOF
+}
+is_draft_name() { case "$NL$DRAFT_NAMES" in *"$NL$1$NL"*) return 0 ;; *) return 1 ;; esac; }
+
+# What stops a note reaching the brief even once promoted, one message per line.
+warnings_for() { # $1 = type dir, $2 = affects (;-joined), $3 = confidence, $4 = status, $5 = inline lines, $6 = tagsbad
+  rest=$2
+  while [ -n "$rest" ]; do
+    nm=${rest%%;*}
+    case "$rest" in *\;*) rest=${rest#*;} ;; *) rest='' ;; esac
+    [ -n "$nm" ] || continue
+    if [ ! -f "$pdir/Components/$nm.md" ]; then
+      printf 'affects "%s", which is not a Component in this project\n' "$nm"
+    elif is_draft_name "$nm"; then
+      printf 'affects %s, still a draft: until it is promoted this note will not reach the brief\n' "$(note_id "$nm")"
+    fi
+  done
+  [ "$3" != low ] || printf 'confidence is low: read the reasoning before you trust it\n'
+  if [ "$1" = Specs ] && [ "$4" = draft ]; then
+    printf 'a Spec stays status: draft until you set it to ready, and Needs Review keeps listing it until then\n'
+  fi
+}
+
+# ------------------------------------------------------------------ listing ---
+do_list() {
+  n=0; body=''
+  while IFS=$US read -r r_path r_draft r_src r_conf r_created r_status r_aff r_sup r_inline r_tagsbad r_says r_paths; do
+    [ -n "$r_path" ] && [ "$r_draft" = 1 ] || continue
+    n=$((n + 1))
+    dir=${r_path%/*}; dir=${dir##*/}
+    line=$(printf '  %-7s %-46s %-9s %s' "$(note_id "$r_path")" "$(clip 46 "$(note_title "$r_path")")" "${r_src:-?}" "${r_created:-}")
+    [ -z "$r_conf" ] || line="$line  confidence: $r_conf"
+    body="$body$line$NL"
+    [ -z "$r_inline" ] || body="$body          ! #tl/draft in the body (line $r_inline): remove it by hand first$NL"
+    [ "$r_tagsbad" != 1 ] || body="$body          ! its tags list spans several lines: edit it by hand$NL"
+    w=$(warnings_for "$dir" "$r_aff" "" "$r_status")
+    if [ -n "$w" ]; then
+      while IFS= read -r wl; do body="$body          ! $wl$NL"; done <<EOW
+$w
+EOW
+    fi
+  done <<EOF
+$ROWS
+EOF
+  printf '\nTHROUGHLINE * promote * %s\n\n' "$proj"
+  if [ "$n" = 0 ]; then
+    printf '  No drafts awaiting review. Nothing is waiting on you.\n\n'
+    return 0
+  fi
+  printf '  %s draft(s) awaiting review. Promote Components first: a Decision or Gotcha\n' "$n"
+  printf '  reaches the brief only through a promoted Component.\n\n'
+  printf '%s\n' "$body"
+  printf '  Look at one:     sh "%s" <id>\n' "$SELF"
+  printf '  Walk them all:   sh "%s" --review     (in your own terminal)\n\n' "$SELF"
+}
+
+# --------------------------------------------------------- finding one note ---
+# Prints the matching row, or exits 2 with a reason. Ids and exact titles win
+# over a piece of a title.
+find_row() {
+  want=$(lower "${1%.md}"); exact=''; part=''; ne=0; np=0
+  while IFS=$US read -r r_path rest; do
+    [ -n "$r_path" ] || continue
+    nm=$(lower "$(note_name "$r_path")"); id=$(lower "$(note_id "$r_path")"); ti=$(lower "$(note_title "$r_path")")
+    if [ "$id" = "$want" ] || [ "$nm" = "$want" ] || [ "$ti" = "$want" ]; then exact="$exact$r_path$NL"; ne=$((ne + 1))
+    else case "$nm" in *"$want"*) part="$part$r_path$NL"; np=$((np + 1)) ;; esac; fi
+  done <<EOF
+$ROWS
+EOF
+  if [ "$ne" -ge 1 ]; then hits=$exact; nh=$ne; else hits=$part; nh=$np; fi
+  if [ "$nh" = 0 ]; then
+    err "no note matches '$1'. List the drafts with: sh \"$SELF\""; return 2
+  elif [ "$nh" -gt 1 ]; then
+    err "'$1' matches $nh notes; use an id:"
+    printf '%s' "$hits" | while IFS= read -r h; do [ -z "$h" ] || printf '  %s\n' "$(note_name "$h")" >&2; done
+    return 2
+  fi
+  FOUND=$(printf '%s' "$hits" | sed -n '1p')
+  return 0
+}
+
+row_for() { printf '%s\n' "$ROWS" | while IFS= read -r l; do case "$l" in "$1$US"*) printf '%s\n' "$l"; break ;; esac; done; }
+
+# ------------------------------------------------------------ one promotion ---
+who() { n=$(git config user.name 2>/dev/null); printf '%s' "${n:-${USERNAME:-${USER:-unknown}}}"; }
+
+log_promotion() { # <path> <source> <confidence> <extra>
+  log="$vault/98 Meta/Promotion Log.md"
+  if [ ! -f "$log" ]; then
+    mkdir -p "$vault/98 Meta" 2>/dev/null
+    {
+      printf -- '---\ntype: hub\nstatus: active\nproject: global\ncreated: %s\nupdated: %s\nsource: human\n---\n\n' "$today" "$today"
+      printf '# Promotion Log\n\nAppend-only record of drafts promoted with `tl-promote`. Promotion is the one act that makes a\ndraft retrievable, so each one leaves a line here: when, which note, who did it, and what the\ndraft claimed to be when you accepted it.\n\nEntries are added below; nothing above or between them is edited.\n\n---\n\n'
+    } > "$log"
+  fi
+  entry="- $today - promoted \`$(note_name "$1")\` ($proj); was source: ${2:-?}"
+  [ -z "$3" ] || entry="$entry, confidence: $3"
+  entry="$entry; by $(who)"
+  [ -z "$4" ] || entry="$entry; $4"
+  printf '%s\n' "$entry" >> "$log"
+}
+
+today=$(date +%Y-%m-%d)
+
+promote_one() { # promote_one <path> <interactive:0|1> ; sets PROMOTED=1 when applied
+  PROMOTED=0
+  file=$1
+  row=$(row_for "$file")
+  [ -n "$row" ] || { err "cannot read $file"; return 4; }
+  IFS=$US read -r r_path r_draft r_src r_conf r_created r_status r_aff r_sup r_inline r_tagsbad r_says r_paths <<EOF
+$row
+EOF
+  id=$(note_id "$file"); title=$(note_title "$file")
+  dir=${file%/*}; dir=${dir##*/}
+
+  if [ "$r_draft" != 1 ]; then
+    printf '\n%s is not a draft: it carries no tl/draft tag, so it is already promoted.\n\n' "$id"
+    return 3
+  fi
+  if [ -n "$r_inline" ]; then
+    err "$id has #tl/draft written in its body (line $r_inline). Obsidian counts that as a tag too, so promoting would leave it a draft. Remove it by hand, then run this again."
+    return 4
+  fi
+  if [ "$r_tagsbad" = 1 ]; then
+    err "$id has a tags list spread over several lines, which cannot be rewritten exactly. Remove tl/draft by hand and set last_verified."
+    return 4
+  fi
+
+  tmp="${file%/*}/.tl-promote-$$.a"
+  awk -v BINMODE=3 -v Q="'" -v BOM="$BOM" -v DATE="$today" "$AWK_PROMOTE" "$file" > "$tmp" 2>"$tmp.err"
+  rc=$?
+  if [ "$rc" != 0 ]; then
+    err "$id cannot be rewritten safely: $(cat "$tmp.err" 2>/dev/null)"; rm -f "$tmp" "$tmp.err"; return 4
+  fi
+  rm -f "$tmp.err"
+  after=$(scan_file "$tmp")
+  IFS=$US read -r a_path a_draft _ <<EOF
+$after
+EOF
+  if [ "${a_draft:-1}" != 0 ]; then
+    err "$id would still count as a draft after the edit. Nothing was changed; edit it by hand."
+    rm -f "$tmp"; return 4
+  fi
+
+  # Supersession: the predecessor is only touched when it is safe and complete.
+  sup_note=''; sup_tmp=''; sup_why=''
+  if [ -n "$r_sup" ]; then
+    pf="$pdir/Decisions/$r_sup.md"
+    # superseded_by is written as a double-quoted YAML string; a quote or backslash
+    # in the title would corrupt the predecessor's frontmatter.
+    case "$(note_name "$file")" in
+      *\"*|*\\*) sup_why="its title contains a quote or backslash, which cannot be written safely into the predecessor. Set status: superseded and superseded_by on $r_sup by hand." ;;
+      *)
+    if [ ! -f "$pf" ]; then
+      sup_why="this note says it supersedes \"$r_sup\", which is not in this project's Decisions. Nothing was marked superseded."
+    else
+      prow=$(row_for "$pf")
+      IFS=$US read -r p_path p_draft p_src p_conf p_created p_status _ <<EOF
+$prow
+EOF
+      if [ "$p_draft" = 1 ]; then
+        sup_why="it supersedes $(note_id "$pf"), which is itself still a draft. Promote that first, or the supersession cannot be completed."
+      elif [ "$p_status" = superseded ]; then
+        sup_why="it supersedes $(note_id "$pf"), which is already marked superseded. Check that it points at the right note."
+      elif [ "$p_status" != active ] && [ "$p_status" != proposed ]; then
+        sup_why="it supersedes $(note_id "$pf"), whose status is $p_status. Nothing was marked superseded."
+      else
+        sup_tmp="${pf%/*}/.tl-promote-$$.b"
+        awk -v BINMODE=3 -v BOM="$BOM" -v LINK="[[$(note_name "$file")]]" "$AWK_SUPERSEDE" "$pf" > "$sup_tmp" 2>/dev/null \
+          && sup_note=$pf || { sup_why="$(note_id "$pf") has no status line to rewrite. Nothing was marked superseded."; rm -f "$sup_tmp"; sup_tmp=''; }
+      fi
+    fi
+      ;;
+    esac
+  fi
+
+  # --- the preview: what this is, and exactly what would change --------------
+  printf '\n%s  %s\n' "$id" "$title"
+  printf '  note       %s\n' "${file#$vault/}"
+  printf '  written    by %s, %s%s\n' "${r_src:-?}" "${r_created:-?}" "$([ -z "$r_conf" ] || printf ', confidence: %s' "$r_conf")"
+  [ -z "$r_says" ]  || printf '  says       %s\n' "$r_says"
+  [ -z "$r_paths" ] || printf '  matches    %s   (retrieval joins on these paths: check them)\n' "$r_paths"
+  printf '\n  Promoting changes exactly this in the note:\n'
+  diff "$file" "$tmp" | tr -d '\r' | sed -n -e 's/^< /    - /p' -e 's/^> /    + /p'
+  if [ -n "$sup_note" ]; then
+    printf '\n  and completes the supersession of %s (and changes nothing else in it):\n' "$(note_id "$sup_note")"
+    diff "$sup_note" "$sup_tmp" | tr -d '\r' | sed -n -e 's/^< /    - /p' -e 's/^> /    + /p'
+  fi
+  warns=$(warnings_for "$dir" "$r_aff" "$r_conf" "$r_status")
+  if [ -n "$warns" ] || [ -n "$sup_why" ]; then
+    printf '\n'
+    printf '%s\n' "$warns" | while IFS= read -r w; do [ -z "$w" ] || printf '  ! %s\n' "$w"; done
+    [ -z "$sup_why" ] || printf '  ! %s\n' "$sup_why"
+  fi
+  printf '\n'
+
+  if [ "$2" != 1 ] && ! is_tty; then
+    printf '  Preview only. Promotion needs a person at a terminal: run this in your own\n'
+    printf '  shell, not through an agent, and answer the prompt.\n\n    sh "%s" %s\n\n' "$SELF" "$id"
+    rm -f "$tmp" "$sup_tmp"; return 0
+  fi
+
+  if [ "$2" = 1 ]; then printf '  Promote? [y] yes  [n] skip  [q] quit > '
+  else printf '  Apply these changes? [y/N] > '; fi
+  IFS= read -r ans || { printf '\n'; ans=q; }
+  case "$(lower "$ans")" in
+    y|yes) ;;
+    q|quit) rm -f "$tmp" "$sup_tmp"; QUIT=1; printf '  Nothing changed.\n\n'; return 0 ;;
+    *)      rm -f "$tmp" "$sup_tmp"; printf '  Nothing changed.\n\n'; return 0 ;;
+  esac
+
+  mv -f "$tmp" "$file" || { err "could not write $file"; rm -f "$tmp" "$sup_tmp"; return 4; }
+  extra=''
+  if [ -n "$sup_note" ]; then
+    if mv -f "$sup_tmp" "$sup_note"; then extra="completed the supersession of \`$(note_name "$sup_note")\`"
+    else
+      err "$id is promoted, but $(note_id "$sup_note") could not be updated. Set status: superseded and superseded_by: \"[[$(note_name "$file")]]\" on it by hand."
+      rm -f "$sup_tmp"
+    fi
+  fi
+  log_promotion "$file" "$r_src" "$r_conf" "$extra"
+  printf '  Promoted %s. It is now eligible for retrieval.\n\n' "$id"
+  PROMOTED=1
+  return 0
+}
+
+# --------------------------------------------------------------------- main ---
+QUIT=0; PROMOTED=0
+load
+
+if [ "$review" = 1 ]; then
+  is_tty || die 1 "--review needs a person at a terminal. Run it in your own shell."
+  paths=''
+  while IFS=$US read -r r_path r_draft _; do
+    [ -n "$r_path" ] && [ "$r_draft" = 1 ] && paths="$paths$r_path$NL"
+  done <<EOF
+$ROWS
+EOF
+  total=$(printf '%s' "$paths" | grep -c .)
+  if [ "$total" = 0 ]; then printf '\nNo drafts awaiting review. Nothing is waiting on you.\n\n'; exit 0; fi
+  printf '\nTHROUGHLINE * review * %s - %s draft(s), Components first\n' "$proj" "$total"
+  i=1; done_n=0; left=0
+  while [ "$i" -le "$total" ] && [ "$QUIT" = 0 ]; do
+    p=$(printf '%s' "$paths" | sed -n "${i}p")
+    printf '\n--- %s of %s ---' "$i" "$total"
+    load                       # an earlier promotion can change what this one warns about
+    promote_one "$p" 1; rc=$?
+    [ "$PROMOTED" = 1 ] && done_n=$((done_n + 1))
+    [ "$rc" = 0 ] || [ "$rc" = 3 ] || [ "$rc" = 4 ] || break
+    i=$((i + 1))
+  done
+  left=$((total - done_n))
+  printf 'Promoted %s of %s. %s still awaiting review.\n\n' "$done_n" "$total" "$left"
+  exit 0
+fi
+
+if [ -z "$ref" ]; then do_list; exit 0; fi
+
+find_row "$ref"; rc=$?
+[ "$rc" = 0 ] || exit "$rc"
+promote_one "$FOUND" 0
+exit $?

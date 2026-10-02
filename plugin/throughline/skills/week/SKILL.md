@@ -83,14 +83,17 @@ Keep the whole thing **under a ten-minute read.** If a section is empty, say so 
 than padding. A quiet week is a legitimate result and should read as one — do not manufacture
 content to fill the template.
 
-Close by pointing at `00 Command/Needs Review.base`, which is where the promotions actually happen,
-and at the promotion checklist in `98 Meta/How Throughline Works.md`.
+Close by telling the user how to act on it: the keepers are promoted with `tl-promote <id>` (or
+`tl-promote --review` to walk the whole queue) run in **their own terminal** — `/throughline:help`
+prints its exact path — and `00 Command/Needs Review.base` is where the rest of the queue lives. The
+by-hand checklist is in `98 Meta/How Throughline Works.md`.
 
 ## Constraints
 
 - **Write only between the markers.** Never anywhere else in Today.md, never any other file.
 - **Never promote a draft.** This skill recommends; the human decides and acts. Removing a
-  `tl/draft` tag is never this skill's job.
+  `tl/draft` tag is never this skill's job. You may run `tl-promote` to *preview* a promotion, never
+  to apply one — and it cannot be applied without a person at a terminal anyway.
 - Never modify, tag, or delete any knowledge note. This skill is read-only outside its own section.
 - Never create notes.
 - Never manufacture findings for a quiet week.

@@ -13,6 +13,76 @@ Versioned record of what changed in the vault, and — more importantly — **ev
 
 ---
 
+## v0.1.8 — 2026-10-02 — `tl-promote`: the human end of the quarantine
+
+Plugin version 0.3.1 → 0.4.0. One new shell command, one new vault note, and no change to any hook,
+to the SessionStart output, or to the twelve skills' contracts beyond what they tell the user to do
+next. Still two hooks, twelve skills, two subagents, zero MCP servers.
+
+**The problem.** The quarantine is the product's reason to exist, but the other half of it — the
+human promotion — was five hand edits in Obsidian that nothing explained. A new user mapped a
+Component, got a draft, and the brief stayed silent; the loop only starts paying off once something
+has been reviewed, and reviewing was the part nobody could discover or tolerate. The review ritual
+was the biggest drop-off in the product.
+
+**What shipped.** `plugin/throughline/bin/tl-promote`, deterministic `sh` and `awk`, no model call:
+
+- `tl-promote` lists the drafts, Components first, and flags any that depend on a draft Component.
+- `tl-promote <id>` shows exactly what promoting that note would change — typically two lines — and
+  asks. It writes nothing unless a person answers `y` at a terminal.
+- `tl-promote --review` walks the whole queue the same way.
+- It removes `tl/draft`, sets `last_verified`, and — for a Decision that replaces another — marks
+  the predecessor `superseded` and sets `superseded_by`, which `decide` deliberately no longer does
+  (v0.1.6). Nothing else changes: line endings and a byte-order mark are preserved, and it never
+  deletes, renames, or creates a knowledge note.
+- Each promotion appends one line to the new [[Promotion Log]]: when, which note, who, and what the
+  draft claimed to be at the time.
+
+**Why a terminal is required.** Claude Code's Bash tool has no terminal, so an agent can *preview* a
+promotion and show it to you, but cannot make one, and piping `y` into the command does nothing.
+That is a guard against accidents, not a security boundary: an agent that may edit files can still
+edit a note's tags, and what stops that remains the prompt contracts. The README says so.
+
+**It refuses rather than guesses**: a `#tl/draft` written in the body, a tags list spread over
+several lines, an edit that would still leave the note a draft, a title that cannot be written
+safely into the predecessor's `superseded_by`.
+
+**What testing found.** Four things, all fixed:
+
+- Promoting a CRLF note on Windows would have silently converted it to LF. gawk there reads in text
+  mode and drops the CR; the same trap `tl-brief` had, here corrupting output rather than input.
+  Every awk call now runs in binary mode. The first version of the test for this *passed by
+  accident*: it counted CRs with `grep`, which also reads in text mode and reported none either
+  way. It now counts bytes with `tr`, and removing the fix makes it fail.
+- A test that checked for the draft tag searched the whole file, whose body legitimately names
+  `tl/draft` in code spans, so it failed for every input. It now reads the frontmatter only.
+- `awk -v` rejects a newline in its value on BSD and mawk; the test passes multi-line input through
+  `ENVIRON` instead.
+- The draft detection exists in `tl-brief` and in `tl-promote`. They are separate copies, so the
+  validator promotes a note and checks that the brief then retrieves it, for six ways of writing
+  the tag. Sharing the code would be better and is not done.
+
+`tools/tl-validate` grew a promotion section (21 checks). Its vault-contract check is now a function,
+so the same contracts can run on a promoted vault: a promotion must leave a valid vault behind.
+Negative controls on copies of the script — terminal guard removed, an unannounced `updated:` edit,
+binary mode removed — each make the gate fail. Not every promotion check has had that treatment.
+
+**Also.** `/throughline:help` prints the command's real path, using `${CLAUDE_PLUGIN_ROOT}`. The docs
+say that is substituted inside skill content; a live `claude -p "/throughline:help"` confirmed it,
+and a live Bash-tool call confirmed `tl-promote` is on its `PATH` and runs. `docs/ROADMAP.md` is
+new: now, next, later, experimental, and rejected-with-reasons, plus a comparison with the tools a
+developer already has.
+
+### Deliberately not changed
+
+- The brief is still silent when only drafts match. Making it say so changes its output contract and
+  is the first item on the roadmap's NEXT list; it was kept out of this change so that this one
+  could be verified on its own.
+- `tl-promote` looks for `.throughline` only in the current directory, like the hooks.
+- `bin/tl-brief` and `bin/tl-session-end` stay mode 644 in git: the hooks call them with `sh`.
+
+---
+
 ## v0.1.7 — 2026-10-02 — Release state aligned: one license, one installed version
 
 No change to the vault's structure, retrieval, or any hook or skill behaviour.
@@ -22,12 +92,18 @@ GitHub after v0.1.6, but `plugin.json` still declared `Commercial` and the READM
 project was not licensed for redistribution. Both now say Apache-2.0, the v0.1.5 note that flagged
 the gap points here, and the working tree now carries the `LICENSE` file.
 
-**The installed plugin was stale.** The copy that Claude Code actually runs hooks from is a cache
-created at install time, and it was still 0.3.0 — without the recursion guard or the shell-less
-distiller from v0.1.6 — while the repository was at 0.3.1. Updating through
-`claude plugin marketplace update` and `claude plugin update` brought the cache to 0.3.1, and every
-file in it is byte-identical to `plugin/throughline/`. Committing a fix does not deploy it: after any
-change under `plugin/throughline/`, the installed copy needs the same two commands and a restart.
+**The installed plugin's cache was stale.** `claude plugin list` reported 0.3.0, and the install
+cache held 0.3.0 hooks — without the recursion guard or the shell-less distiller from v0.1.6 —
+while the repository was at 0.3.1. Updating through `claude plugin marketplace update` and
+`claude plugin update` brought the cache to 0.3.1, byte-identical to `plugin/throughline/`.
+
+*Correction, added in v0.1.8.* This entry first said the cache is "the copy that Claude Code
+actually runs hooks from", and the audit that preceded it rated stale hooks a high risk. That was
+inferred, not verified, and it is wrong for this machine. The marketplace here is a local directory,
+which Claude Code loads in place: `${CLAUDE_PLUGIN_ROOT}` and the Bash tool's `PATH` both resolve to
+the repository, so the hooks were probably running the working-tree scripts all along. The cache is
+what runs for an install from GitHub or any other non-local marketplace; for those, committing a fix
+does not deploy it, and an update plus a restart is needed.
 
 **Verified live.** The distiller's launch was changed in v0.1.6 and had only been exercised against
 a stub CLI. With the CLI logged in again, one real headless session — six tool calls, a dirty tree,

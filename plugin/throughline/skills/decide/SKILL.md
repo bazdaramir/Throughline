@@ -99,9 +99,10 @@ Report: the ID, the path, **the alternatives table inline** so the user can corr
 seconds, and — if `reversal_cost` is `irreversible` — say so loudly. If this supersedes an earlier
 decision, name it and give the edit that completes the supersession when the draft is promoted: on
 the predecessor, `status: superseded` and `superseded_by: "[[D-NNNN <this note's title>]]"`, nothing
-else. Close with the quarantine notice: the note is `#tl/draft`, and neither the brief nor
-`/throughline:why` will treat it as settled until a human promotes it (checklist in
-`98 Meta/How Throughline Works.md`).
+else — `tl-promote` does this for the user when they promote the draft, and shows the edit first.
+Close with the quarantine notice: the note is `#tl/draft`, and neither the brief nor
+`/throughline:why` will treat it as settled until a human promotes it, with `tl-promote <id>` in
+their own terminal (by-hand checklist in `98 Meta/How Throughline Works.md`).
 
 ## Constraints
 

@@ -55,14 +55,25 @@ inspect the vault, do not resolve the project, do not personalise the output. It
 - `/throughline:audit` — eight checks of the vault against the codebase. Flags, never modifies.
 
 **The one ritual:** once a week, run `/throughline:week` for a keep-or-drop call on every draft, then
-clear `00 Command/Needs Review.base` in Obsidian. Everything else is automatic. One ritual is
-sustainable; five are not.
+promote the keepers with `tl-promote` and clear `00 Command/Needs Review.base` in Obsidian.
+Everything else is automatic. One ritual is sustainable; five are not.
 
 **Every knowledge note Throughline writes is quarantined** with `#tl/draft` — invisible to the
 session brief, `/throughline:brief`, `/throughline:why`, and `/throughline:spec` until *you* promote
-it in Obsidian: remove the tag and set `last_verified` (the full checklist is in
-`98 Meta/How Throughline Works.md`). No skill can promote its own output. That is what makes
-automatic capture safe.
+it. No skill can promote its own output. That is what makes automatic capture safe.
+
+**Promoting is one command, run by you in your own terminal** — it is a shell command, not a slash
+command, so it is not one of the twelve:
+
+```
+sh "${CLAUDE_PLUGIN_ROOT}/bin/tl-promote"            list the drafts awaiting review
+sh "${CLAUDE_PLUGIN_ROOT}/bin/tl-promote" D-0004     show exactly what promoting one would change
+sh "${CLAUDE_PLUGIN_ROOT}/bin/tl-promote" --review   walk through them all, Components first
+```
+
+Run it from the repository root. It shows the exact edit, then asks; it changes nothing until you
+answer `y` at a terminal, so an agent can preview a promotion but never make one. The hand-edit
+alternative is in `98 Meta/How Throughline Works.md`.
 
 **Two things happen without you asking.**
 
@@ -80,6 +91,7 @@ Full workflow reference: `98 Meta/Workflow Cheat Sheet.md` in the vault.
 ## Constraints
 
 - No file reads. No vault access. No model reasoning. If this skill is slow, it is wrong.
-- Do not invent commands. There are exactly twelve.
+- Do not invent commands. There are exactly twelve slash commands, plus the one shell command,
+  `tl-promote`, described above.
 - Do not describe the automatic layer as doing more than it does. Two hooks, both silent by default,
   neither able to promote a note.

@@ -96,7 +96,8 @@ Report: the ID, the path, the `paths` value you chose, and the invariants — su
 correction, because **the user's correction of the invariants is the value being captured.** Close
 by noting the note is `#tl/draft` and invisible to retrieval until promoted — and that because every
 Decision and Gotcha reaches the brief *through* a Component, nothing attached to this one will
-either, until it is promoted.
+either, until it is promoted. Tell the user how: `tl-promote <id>` in their own terminal shows the
+exact edit and asks first (`/throughline:help` prints its path).
 
 ## Constraints
 

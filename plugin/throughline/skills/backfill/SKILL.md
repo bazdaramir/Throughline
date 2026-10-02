@@ -32,8 +32,10 @@ real code. Everything about how it behaves shapes whether they trust the system.
    window.
 4. Relay its progress and its closing confidence summary **verbatim** — especially which notes it
    is confident about and which it is inferring. Do not smooth that over.
-5. Point the user at `00 Command/Needs Review.base`: everything produced is `#tl/draft` and needs a
-   promotion pass.
+5. Tell the user that everything produced is `#tl/draft` and needs a promotion pass, and how to do
+   it: `tl-promote --review` in their own terminal walks the queue with Components first (they are
+   the join key; `/throughline:help` prints the command's path). `00 Command/Needs Review.base` is
+   the same queue in Obsidian.
 
 ## Output contract
 

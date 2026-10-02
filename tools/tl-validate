@@ -32,7 +32,7 @@ say '========================'
 
 # ---------------------------------------------------------------- shell ---
 say ''
-say 'Hook scripts parse as POSIX sh'
+say 'Plugin scripts parse as POSIX sh'
 for f in "$plugin"/bin/*; do
   [ -f "$f" ] || continue
   if sh -n "$f" 2>/dev/null; then ok "$(basename "$f")"; else bad "$(basename "$f") - syntax error"; fi
@@ -86,10 +86,10 @@ done
 # Component never reaches the brief, and nothing says so.
 say ''
 say 'Vault notes honour their contracts'
-if [ "$have_node" = 0 ]; then
-  bad 'node not found - vault contracts not checked (install Node.js)'
-else
-node - "$vault" <<'NODE'
+# A function, so the same contracts can be checked on any vault directory - the
+# promotion tests use it to prove a promoted vault is still a valid one.
+check_vault() {
+node - "$1" <<'NODE'
 const fs = require('fs'), path = require('path');
 const root = process.argv[2];
 const mds = [], bases = [];
@@ -276,7 +276,13 @@ const label = issues === 0 ? '  ok  ' : '  FAIL';
 console.log(`${label}  ${mds.length} notes, ${bases.length} bases, ${issues} issue(s)`);
 process.exit(issues === 0 ? 0 : 1);
 NODE
-[ $? -eq 0 ] || fail=$((fail + 1))
+}
+
+if [ "$have_node" = 0 ]; then
+  bad 'node not found - vault contracts not checked (install Node.js)'
+else
+  check_vault "$vault"
+  [ $? -eq 0 ] || fail=$((fail + 1))
 fi
 
 # ------------------------------------------------------ disposable fixture ---
@@ -408,6 +414,161 @@ if [ "$fixture_ok" = 1 ]; then
   out=$(cd "$tmp" && unset THROUGHLINE_DISTILLING && THROUGHLINE_VAULT="$fx" sh "$plugin/bin/tl-brief" 2>&1)
   if [ $? -eq 0 ] && [ -z "$out" ]; then ok 'silent, exit 0, outside a Throughline repository'
   else bad 'not silent outside a Throughline repository'; fi
+fi
+
+# ----------------------------------------------------------- promotion ---
+# Promotion is the one act that makes a draft trustworthy, so the tool that
+# performs it is held to the strictest standard here: it may change exactly what
+# it says it changes, only for a person at a terminal, and what it leaves behind
+# must still be a valid vault that the brief retrieves from.
+if [ "$fixture_ok" = 1 ]; then
+  say ''
+  say 'tl-promote makes promotion cheap without making it automatic'
+  today=$(date +%Y-%m-%d)
+  g3orig="$vault/01 Projects/example-api/Gotchas/G-0003 Logged-out sessions still resolve for up to 30 seconds.md"
+  vsum() { (cd "$fx" && find . -type f -print0 | sort -z | xargs -0 cksum); }
+  # `promote` stands in for a person at a terminal; `asagent` is what Claude Code's Bash tool is.
+  promote() { (cd "$repo" && unset THROUGHLINE_DISTILLING && THROUGHLINE_VAULT="$fx" TL_PROMOTE_TEST_ASSUME_TTY=1 sh "$plugin/bin/tl-promote" "$@") 2>&1; }
+  asagent() { (cd "$repo" && unset THROUGHLINE_DISTILLING && unset TL_PROMOTE_TEST_ASSUME_TTY && THROUGHLINE_VAULT="$fx" sh "$plugin/bin/tl-promote" "$@") 2>&1; }
+  retrieved() { case "$(brief)" in *"[[$1 "*) return 0 ;; *) return 1 ;; esac; }
+  leftovers=''
+  sweep() { l=$(find "$fx" -name '.tl-promote-*' 2>/dev/null); [ -z "$l" ] || leftovers="$leftovers $l"; }
+  # Does the FRONTMATTER still mention tl/draft? (The body legitimately names it in code spans.)
+  fmdraft() { awk '{ sub(/\r$/, "") } NR == 1 { next } /^---[ \t]*$/ { exit } /tl\/draft/ { f = 1 } END { exit !f }' "$1"; }
+  g3tags() { # rewrite G-0003's tags block (3 lines) with the lines in $1
+    # ENVIRON, not -v: BSD awk and mawk reject a newline inside a -v value.
+    tr -d '\r' < "$g3orig" | NEWTAGS="$1" awk '/^tags:$/ { print ENVIRON["NEWTAGS"]; skip = 2; next } skip > 0 { skip--; next } { print }' > "$g3"
+  }
+
+  # Listing and previewing change nothing, and a piped "y" is not a person.
+  fresh_vault; before=$(vsum)
+  out=$(asagent </dev/null); rc=$?
+  if [ $rc -eq 0 ] && case "$out" in *G-0003*) true ;; *) false ;; esac && [ "$(vsum)" = "$before" ]; then
+    ok 'lists the drafts and changes nothing'
+  else bad 'listing failed or changed the vault'; fi
+  out=$(printf 'y\n' | asagent G-0003); rc=$?
+  if [ $rc -eq 0 ] && case "$out" in *'Preview only'*) true ;; *) false ;; esac && [ "$(vsum)" = "$before" ]; then
+    ok 'without a terminal it can only preview - a piped "y" promotes nothing'
+  else bad 'promoted, or failed to preview, without a terminal'; fi
+  out=$(printf 'n\n' | promote G-0003); [ "$(vsum)" = "$before" ] && ok 'answering no changes nothing' || bad 'answering no changed the vault'
+  out=$(promote G-0003 </dev/null); [ "$(vsum)" = "$before" ] && ok 'closing the prompt changes nothing' || bad 'closing the prompt changed the vault'
+
+  # Promotion changes exactly what it says, the brief then retrieves the note,
+  # the vault is still valid, and the act is logged.
+  fresh_vault
+  out=$(printf 'y\n' | promote G-0003); rc=$?
+  changes=$(diff "$g3orig" "$g3" | sed -n 's/^[<>] //p')
+  want=$(printf '  - tl/draft\nlast_verified: %s' "$today")
+  if [ $rc -eq 0 ] && [ "$changes" = "$want" ]; then ok 'promotion changes exactly the tag and last_verified, nothing else'
+  else bad "unexpected edit (exit $rc): $changes"; fi
+  retrieved G-0003 && ok 'a promoted note is then retrieved by the brief' || bad 'the brief ignores a note that was just promoted'
+  cv=$(check_vault "$fx" 2>&1) && ok 'the promoted vault still satisfies every contract' || bad "promotion broke a vault contract: $(printf '%s' "$cv" | grep FAIL | head -2)"
+  [ "$(grep -c 'G-0003' "$fx/98 Meta/Promotion Log.md" 2>/dev/null)" = 1 ] && ok 'the promotion is recorded in the Promotion Log' || bad 'no single Promotion Log line for the promotion'
+  now=$(vsum); out=$(printf 'y\n' | promote G-0003); rc=$?
+  [ $rc -eq 3 ] && [ "$(vsum)" = "$now" ] && ok 'promoting twice is refused and changes nothing' || bad "second promotion: exit $rc"
+  sweep
+
+  # Every way a draft tag is written must promote, and then be retrieved.
+  nbad=''; nshape=0
+  for shape in flowmix flowonly quoted scalar tagkey commented; do
+    nshape=$((nshape + 1)); fresh_vault
+    case $shape in
+      flowmix)   g3tags 'tags: [tl/draft, tl/security]' ;;
+      flowonly)  g3tags 'tags: [tl/draft]' ;;
+      quoted)    g3tags 'tags:
+  - "tl/draft"
+  - tl/security' ;;
+      scalar)    g3tags 'tags: tl/draft' ;;
+      tagkey)    g3tags 'tag:
+  - tl/draft' ;;
+      commented) g3tags 'tags:
+  # taken from a session
+  - tl/draft' ;;
+    esac
+    printf 'y\n' | promote G-0003 >/dev/null
+    if fmdraft "$g3" || ! retrieved G-0003; then nbad="$nbad $shape"; fi
+    [ "$shape" != commented ] || grep -q 'taken from a session' "$g3" || nbad="$nbad commented(lost-comment)"
+    sweep
+  done
+  [ -z "$nbad" ] && ok "all $nshape tag shapes promote, and the brief then retrieves the note" || bad "tag shapes that failed:$nbad"
+
+  # What it cannot do safely, it refuses - and leaves the vault alone.
+  nbad=''
+  for case_ in inline stillbad multiline; do
+    fresh_vault
+    case $case_ in
+      inline)    sed '/^  - tl\/draft$/d' "$g3orig" | awk '{ print } /^## Symptom$/ { print "Unconfirmed. #tl/draft" }' > "$g3" ;;
+      stillbad)  g3tags 'tags: x #tl/draft' ;;
+      multiline) g3tags 'tags: [
+  tl/draft,
+  tl/security
+]' ;;
+    esac
+    before=$(vsum); out=$(printf 'y\n' | promote G-0003); rc=$?
+    [ $rc -eq 4 ] && [ "$(vsum)" = "$before" ] && [ -n "$out" ] || nbad="$nbad $case_(exit $rc)"
+    sweep
+  done
+  [ -z "$nbad" ] && ok 'refuses an inline tag, an unrewritable layout, and an edit that would leave a draft' || bad "unsafe cases not refused:$nbad"
+
+  fresh_vault; before=$(vsum); nbad=''
+  asagent nothing-like-this >/dev/null; [ $? -eq 2 ] || nbad="$nbad unknown"
+  asagent Redis >/dev/null;             [ $? -eq 2 ] || nbad="$nbad ambiguous"
+  asagent '../../98 Meta/How Throughline Works' >/dev/null; [ $? -eq 2 ] || nbad="$nbad path"
+  asagent D-0001 >/dev/null;            [ $? -eq 3 ] || nbad="$nbad not-a-draft"
+  [ -z "$nbad" ] && [ "$(vsum)" = "$before" ] && ok 'unknown, ambiguous, path-like, and already-promoted references are refused' || bad "reference handling:$nbad"
+
+  # CRLF line endings and a byte-order mark survive.
+  fresh_vault
+  bom=$(printf '\357\273\277')
+  tr -d '\r' < "$g3orig" | awk -v B="$bom" 'FNR == 1 { printf "%s", B } { printf "%s\r\n", $0 }' > "$g3"
+  printf 'y\n' | promote G-0003 >/dev/null
+  # Count bytes with tr: MSYS grep and sed read in text mode and drop the CR themselves.
+  total=$(wc -l < "$g3" | tr -d ' '); crlf=$(tr -cd '\r' < "$g3" | wc -c | tr -d ' ')
+  head3=$(head -c 3 "$g3" | od -An -tx1 | tr -d ' \n')
+  if [ "$total" = "$crlf" ] && [ "$head3" = efbbbf ] && ! fmdraft "$g3" && retrieved G-0003; then
+    ok 'CRLF line endings and a byte-order mark survive promotion'
+  else bad "CRLF/BOM damaged: $crlf of $total lines end in CR, starts $head3"; fi
+
+  # Supersession is completed on the predecessor, and only there, and only when safe.
+  d4="$proj/Decisions/D-0004 Move session storage to Postgres.md"
+  d4orig="$vault/01 Projects/example-api/Decisions/D-0004 Move session storage to Postgres.md"
+  d5="$proj/Decisions/D-0005 Use idempotency keys.md"
+  mk_d5() { printf -- '---\ntype: decision\nstatus: active\nproject: example-api\ncreated: 2026-10-01\nupdated: 2026-10-01\nsource: agent\naffects: ["[[C-0002 Session store]]"]\nconfidence: medium\nsupersedes: "[[D-0004 Move session storage to Postgres]]"\ntags:\n  - tl/draft\n---\n\n## Decision\nx\n' > "$d5"; }
+  fresh_vault; mk_d5
+  printf 'y\n' | promote D-0005 >/dev/null
+  changes=$(diff "$d4orig" "$d4" | sed -n 's/^[<>] //p')
+  want=$(printf 'status: active\nstatus: superseded\nsuperseded_by: "[[D-0005 Use idempotency keys]]"')
+  [ "$changes" = "$want" ] && ok 'completes the supersession on the predecessor and changes nothing else in it' || bad "predecessor edit: $changes"
+  cv=$(check_vault "$fx" 2>&1) && retrieved D-0005 && ! retrieved D-0004 \
+    && ok 'the brief then shows the new decision and no longer the superseded one' \
+    || bad 'after a supersession the vault is invalid or the brief shows the wrong decision'
+  fresh_vault; mk_d5
+  sed 's/^source: human$/source: human\ntags:\n  - tl\/draft/' "$d4orig" > "$d4"
+  before=$(cat "$d4"); out=$(printf 'y\n' | promote D-0005)
+  if [ "$(cat "$d4")" = "$before" ] && ! grep -q 'tl/draft' "$d5" && case "$out" in *'itself still a draft'*) true ;; *) false ;; esac; then
+    ok 'a predecessor that is itself a draft is left alone, with a warning'
+  else bad 'touched a draft predecessor, or did not warn'; fi
+  sweep
+
+  # The review queue: Components first, warnings that name the dependency, and no
+  # promotion without a terminal.
+  fresh_vault
+  printf -- '---\ntype: component\nstatus: active\nproject: example-api\ncreated: 2026-10-01\nupdated: 2026-10-01\nsource: backfill\npaths: ["src/payments/"]\ntags:\n  - tl/draft\n---\n\n## What it does\nx\n' > "$proj/Components/C-0004 Payments gateway.md"
+  printf -- '---\ntype: decision\nstatus: active\nproject: example-api\ncreated: 2026-10-01\nupdated: 2026-10-01\nsource: backfill\naffects: ["[[C-0004 Payments gateway]]"]\nconfidence: low\ntags:\n  - tl/draft\n---\n\n## Decision\nx\n' > "$d5"
+  out=$(asagent </dev/null)
+  case "$out" in *'affects C-0004, still a draft'*) ok 'names the draft Component a note depends on' ;; *) bad 'no warning about a draft Component' ;; esac
+  before=$(vsum); asagent --review </dev/null >/dev/null; rc=$?
+  [ $rc -eq 1 ] && [ "$(vsum)" = "$before" ] && ok '--review refuses to run without a terminal' || bad "--review without a terminal: exit $rc"
+  out=$(printf 'q\n' | promote --review); [ "$(vsum)" = "$before" ] && ok 'quitting a review changes nothing' || bad 'quitting a review changed the vault'
+  out=$(printf 'y\ny\ny\n' | promote --review)
+  order=$(printf '%s\n' "$out" | grep -E '^(C-0004|D-0005|G-0003)  ' | cut -c1-6 | tr '\n' ' ')
+  if [ "$order" = 'C-0004 D-0005 G-0003 ' ] && case "$out" in *'Promoted 3 of 3'*) true ;; *) false ;; esac \
+     && check_vault "$fx" >/dev/null 2>&1 && retrieved G-0003; then
+    ok 'a review walks Components first and promotes what you accept'
+  else bad "review order or outcome wrong: $order"; fi
+  sweep
+
+  [ -z "$leftovers" ] && ok 'no temporary files are left behind' || bad "temporary files left:$leftovers"
 fi
 
 # ---------------------------------------------------- distillation guard ---

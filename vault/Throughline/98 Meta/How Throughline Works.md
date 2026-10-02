@@ -67,17 +67,36 @@ This one rule is what makes automatic capture safe. Without it, auto-capture poi
 
 ### Promoting a draft
 
-A short read and a few property edits, done in Obsidian:
+Read it first, and fix what is wrong — once promoted it is yours, so correct the title, `affects`,
+`paths`, or the reasoning before you accept it. Then promote it with the command, or by hand.
 
-1. **Read it and fix what is wrong.** Once promoted it is yours — correct the title, `affects`, `paths`, or the reasoning first.
-2. **Remove `tl/draft`** from `tags`.
-3. **Set `last_verified`** to today. Without it the note stays in [[Needs Review.base|Needs Review]], which keeps every unverified note older than seven days.
-4. **Promote what it hangs off.** A Decision or Gotcha reaches the brief only *through* a promoted Component in its `affects` — if that Component is still a draft, promote it first.
-5. **If it has `supersedes`,** open the Decision it names and set `status: superseded` and `superseded_by` to this note. Change nothing else on it. Skills deliberately leave this to you: until you promote the replacement, the old decision is still the one in force.
+**With `tl-promote`** (a shell command that ships in the plugin's `bin/`; `/throughline:help` prints
+its exact path). Run it from the repository root, in your own terminal:
+
+- `tl-promote` lists the drafts, Components first, and flags any that depend on a draft Component.
+- `tl-promote D-0004` shows **exactly** what promoting that note would change — a few lines — and
+  asks. Nothing is written until you answer `y` at a terminal, so an agent can preview a promotion
+  but cannot make one.
+- `tl-promote --review` walks the whole queue the same way: Components first, one prompt each.
+
+Each promotion is one line in the [[Promotion Log]]: when, which note, who, and what the draft
+claimed to be when you accepted it.
+
+**By hand, in Obsidian** — the command does exactly these steps, no more:
+
+1. **Remove `tl/draft`** from `tags`.
+2. **Set `last_verified`** to today. Without it the note stays in [[Needs Review.base|Needs Review]], which keeps every unverified note older than seven days.
+3. **Promote what it hangs off.** A Decision or Gotcha reaches the brief only *through* a promoted Component in its `affects` — if that Component is still a draft, promote it first.
+4. **If it has `supersedes`,** open the Decision it names and set `status: superseded` and `superseded_by` to this note. Change nothing else on it. Skills deliberately leave this to you: until you promote the replacement, the old decision is still the one in force.
 
 Leave `source` as it is. Provenance records who *wrote* the note, not who approved it.
 
-**Dropping a draft** is deleting the note.
+**Dropping a draft** is deleting the note. The command never deletes.
+
+The command refuses, and changes nothing, when it cannot be exact: a `#tl/draft` written in the body
+(Obsidian counts it as a tag, so removing the frontmatter tag would not promote the note), a tags
+list spread over several lines, or any edit that would still leave the note a draft. Those need a
+hand edit.
 
 Obsidian's Properties panel rewrites list properties as one item per line when you edit them. That is fine — retrieval reads both shapes.
 

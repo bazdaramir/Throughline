@@ -89,7 +89,8 @@ Sections, in this exact order:
   because the wrong fix is the first thing both a human and an agent will try. If the conversation
   contains an approach that looked right and failed, it belongs here.
 
-Report the ID, the path, the estimated `cost` flagged as an estimate, and the quarantine notice.
+Report the ID, the path, the estimated `cost` flagged as an estimate, and the quarantine notice —
+including that the user promotes it with `tl-promote <id>` in their own terminal.
 
 **If `recurrence` is now ≥ 2**, add: this has bitten more than once and is a candidate for promotion
 to a Practice — a landmine you have stepped on twice is a missing convention. **Note it; do not
