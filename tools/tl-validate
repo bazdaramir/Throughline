@@ -37,6 +37,12 @@ for f in "$plugin"/bin/*; do
   [ -f "$f" ] || continue
   if sh -n "$f" 2>/dev/null; then ok "$(basename "$f")"; else bad "$(basename "$f") - syntax error"; fi
 done
+# bash 3.2 - macOS's /bin/sh - cannot parse a heredoc inside $( ) whose text holds an
+# unbalanced apostrophe, and every hook swallows its own errors, so the failure is
+# silent. `sh -n` here may be dash or a newer bash and would not notice; this does.
+hd=$(awk '/^[ \t]*#/ { next } /\$\([^)]*<</ { print FILENAME ":" FNR }' "$plugin"/bin/* 2>/dev/null)
+if [ -z "$hd" ]; then ok 'no heredoc inside a command substitution (bash 3.2 cannot parse one with an apostrophe)'
+else bad "heredoc inside a command substitution: $hd"; fi
 
 # ----------------------------------------------------------------- json ---
 say ''

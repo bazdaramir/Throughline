@@ -85,7 +85,13 @@ today=$(date +%Y-%m-%d 2>/dev/null || true)
 now=$(date '+%Y-%m-%d %H:%M %z' 2>/dev/null || true)
 
 # ------------------------------------------------------- the distillation ---
-prompt=$(cat <<EOF
+# A function, not `prompt=$(cat <<EOF ...)`: bash 3.2 - macOS's /bin/sh - cannot parse
+# a heredoc inside $( ) when its text holds an unbalanced apostrophe, and this text
+# does ("session's start time"). The hook then fails to parse at all, and because it
+# swallows every error, distillation silently never runs. The workflow that runs the
+# gate on macOS found this; a heredoc in a function body parses everywhere.
+build_prompt() {
+cat <<EOF
 Write a Throughline Session note for the session that just ended.
 
 Vault:   $vault
@@ -156,7 +162,8 @@ The quarantine tag is applied differently to the two kinds of note:
 You may NEVER remove a tl/draft tag, promote a note, rename a note, delete a
 note, or edit any existing knowledge note. Create only.
 EOF
-)
+}
+prompt=$(build_prompt)
 
 # Detached, backgrounded, silenced unless THROUGHLINE_LOG is set. The user has
 # already gone. THROUGHLINE_DISTILLING is what stops the spawn distilling itself.

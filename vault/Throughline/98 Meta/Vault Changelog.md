@@ -59,6 +59,27 @@ a draft Component's paths but not its *name*, so a draft Decision could never be
 Component and was silently never counted. The test for "promoting the Component makes the drafts
 that hang off it relevant" failed, which is how it was found.
 
+**What CI found.** The first run of the new workflow, on the commit that introduced it:
+
+| Runner | Result |
+|---|---|
+| `ubuntu-latest` | 71 ok, 0 FAIL |
+| `windows-latest` (GitHub's, a second Windows machine) | 71 ok, 0 FAIL |
+| `macos-latest` | 68 ok, **3 FAIL** |
+
+The macOS failures were one real bug and two consequences of it. `bin/tl-session-end` — which has
+shipped since v0.1.0 — **did not parse under macOS's `/bin/sh`** (bash 3.2): it built the
+distiller's prompt with `prompt=$(cat <<EOF … EOF)`, and bash 3.2 cannot parse a heredoc inside
+`$( )` whose text holds an unbalanced apostrophe ("the session's start time"). Every hook swallows
+its own errors, so on macOS distillation would have silently never run, with nothing anywhere to
+say why. Everything else on macOS passed, including all of the BSD `awk`, `sed`, `find` and `xargs`
+behaviour of `tl-brief` and `tl-promote`. The prompt now lives in a function (a heredoc in a
+function body parses everywhere; its text is byte-identical), and the validator carries a lint that
+fails on a heredoc inside a command substitution in any shipped script, which a local `sh -n`
+cannot catch because it is dash or a newer bash. The lint flags the pre-fix hook at its line 88.
+Whether macOS now passes is recorded in the next entry of this section, from the next CI run, not
+assumed.
+
 **What a benchmark found.** The first version of the draft count read every note a second time and
 split the results with `sed` and `grep`: about fifteen extra processes. On a vault of 814 notes
 (200 of them drafts) under Git Bash the brief went from ~1.3 s to ~2.1 s — past the "under 2 s"
@@ -80,7 +101,7 @@ what a Windows hook pays for; the script's header says so, so it is not reintrod
   can promote."* A second run named `tl-promote`, said the brief omits drafts, and said only the
   user can promote. That is two runs of one model on one prompt, not a guarantee of behaviour.
 
-**Tests.** `tools/tl-validate`: 54 → 71 checks, all passing locally. New: the empty state; a first-run
+**Tests.** `tools/tl-validate`: 54 → 72 checks, all passing locally. New: the empty state; a first-run
 draft Component; multiple drafts across kinds with a status filter and a queue total; four ways of
 writing the draft tag; an empty note, a note with no frontmatter, binary bytes and an unclosed list;
 a vault path and a repository path containing a space; filenames with an apostrophe, an ampersand,
@@ -106,10 +127,9 @@ must fail. All did, for the intended reason:
 
 - **Verified here:** Windows 11, Git Bash (MSYS), gawk 5.4, `dash` as `sh`, `gawk --posix`, gawk in
   binary mode, and C, C.UTF-8 and en_US.UTF-8 locales.
-- **Not verified here:** Linux and macOS. Docker is installed but its daemon was not running, and
-  nothing was started or downloaded to change that. The new workflow exists to supply this
-  evidence; its first results are recorded below when they exist, and until then nothing in this
-  repository claims Linux or macOS support.
+- **Not verified from this machine:** Linux and macOS. Docker is installed but its daemon was not
+  running, and nothing was started or downloaded to change that. Their evidence is the CI run
+  recorded under *What CI found* above.
 - **Not verified anywhere:** `tl-promote`'s apply path at a real terminal (it has only been driven
   through its test seam), and its terminal check in mintty, PowerShell and Windows Terminal.
 - **Known weak spots:** a thread cut at 140 *bytes* can split a multi-byte character under an awk
