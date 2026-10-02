@@ -77,8 +77,19 @@ behaviour of `tl-brief` and `tl-promote`. The prompt now lives in a function (a 
 function body parses everywhere; its text is byte-identical), and the validator carries a lint that
 fails on a heredoc inside a command substitution in any shipped script, which a local `sh -n`
 cannot catch because it is dash or a newer bash. The lint flags the pre-fix hook at its line 88.
-Whether macOS now passes is recorded in the next entry of this section, from the next CI run, not
-assumed.
+The next run, on the fix (`8c257d5`), passed everywhere:
+
+| Runner | Result |
+|---|---|
+| `ubuntu-latest` | 72 ok, 0 FAIL |
+| `macos-latest` | 72 ok, 0 FAIL |
+| `windows-latest` | 72 ok, 0 FAIL |
+
+That confirms the diagnosis (the same code, with only the heredoc moved into a function, now
+parses). It does **not** say which `awk`, `sed` or shell each runner used — the job logs need a
+GitHub login to read — so the workflow now publishes them as annotations, which do not. The runner
+labels float, so a green run is a dated fact, not a standing guarantee. CI has no terminal and
+cannot test `tl-promote`'s apply path at a real prompt.
 
 **What a benchmark found.** The first version of the draft count read every note a second time and
 split the results with `sed` and `grep`: about fifteen extra processes. On a vault of 814 notes

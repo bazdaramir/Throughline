@@ -27,7 +27,8 @@ Checked 2026-10-02 against the alternatives a developer already has.
 **Where Throughline is weak.** Review is manual work (being fixed — see NOW). There is no search
 (`/throughline:why` and `/throughline:brief` are model-driven walks over notes, not an index).
 Retrieval is exact path matching, so a decision recorded against a since-renamed directory is
-missed. There is no web UI and no team story. Only one machine has run it.
+missed. There is no web UI and no team story. CI now runs the gate on Linux, macOS and Windows,
+but no real-world installs exist beyond the author's machine.
 
 **Where the genuine opportunity is.** *Trust as the product.* Memory tools compete on how much they
 remember; the unaddressed problem is that agents act on memories nobody checked. A memory with
@@ -48,14 +49,17 @@ Capture → quarantine → human review → retrieval only feels natural if each
   is **labelled, capped and cleaned**.
 - Two notes sharing an id now **fail the vault contracts**.
 - **CI** runs the gate on Linux, macOS and Windows, so portability is measured rather than assumed.
+  Its first run found a real bug — the SessionEnd hook did not parse under macOS's `/bin/sh` — and
+  it is fixed; all three platforms then passed 72/72.
 
 Stage 2 (`tl-promote`) shipped in v0.1.8: lists drafts, previews the exact edit, applies only with a
 person at a terminal, walks the queue, completes supersessions, and logs each promotion.
 
 ## NEXT
 
-1. **Fix whatever CI finds.** Until the first matrix run, "tested on one machine" is still the
-   honest summary. BSD `sed`/`awk`/`find`/`xargs` and macOS bash 3.2 are the likeliest sources.
+1. **Watch CI, and widen it where it is thin.** It runs the three `*-latest` runners with whatever
+   awk they ship. Not covered: a strict POSIX awk such as busybox's (Alpine), `zsh` as `sh`, and an
+   older macOS than the runner's. The first run already earned its place by finding a real bug.
 2. **Verify `tl-promote` at a real terminal on Windows.** The apply path has only been exercised
    through its test seam. Whether the `-t 0`/`-t 1` check behaves in mintty, PowerShell and Windows
    Terminal is untested, and no CI runner has a terminal.

@@ -438,11 +438,15 @@ a distiller that chooses to emit draft notes — that path is covered by the stu
   of Debian and Ubuntu. That is a proxy for Linux, not Linux: no other operating system has run
   the scripts *from this machine*.
 - **Linux and macOS are exercised by CI, and only CI.** `.github/workflows/validate.yml` runs
-  `sh tools/tl-validate` on Ubuntu, macOS and Windows. Read the workflow's status on GitHub for
-  the current truth rather than this paragraph; the changelog records the first results. Nothing
-  here claims Linux or macOS support beyond what that run shows. CI has no terminal, so it cannot
-  exercise `tl-promote`'s apply path at a real prompt; that has only been driven through its test
-  seam, and its terminal check in mintty, PowerShell and Windows Terminal is unverified.
+  `sh tools/tl-validate` on GitHub's `ubuntu-latest`, `macos-latest` and `windows-latest` runners.
+  The gate (72 checks) passed on all three at commit `8c257d5`. Its first run did not: macOS failed
+  because `bin/tl-session-end` did not parse under bash 3.2, a bug that would have silently disabled
+  distillation on macOS (changelog v0.1.9). The runners' labels float, and the exact `awk`, `sed`
+  and shell versions are published as annotations on each run rather than recorded here. Read the
+  workflow's current status on GitHub for the truth; this paragraph is a dated claim. CI has no
+  terminal, so it cannot exercise `tl-promote`'s apply path at a real prompt: that has only been
+  driven through its test seam, and its terminal check in mintty, PowerShell and Windows Terminal
+  is unverified.
 
 ## Current status
 
@@ -473,7 +477,7 @@ roadmap gets written by observing usage instead of guessing.
 The living roadmap — **now, next, later, experimental, and rejected with reasons** — is
 [`docs/ROADMAP.md`](docs/ROADMAP.md). In short: the review loop is the product's bottleneck, so
 that comes first (`tl-promote` is the first piece); then making the silent brief explain itself,
-CI to turn "tested on one machine" into evidence, and validating a user's own vault. Semantic
+verifying `tl-promote` at a real terminal, and validating a user's own vault. Semantic
 retrieval, if it is ever built, belongs *beside* the deterministic brief as an opt-in second pass,
 never replacing it.
 

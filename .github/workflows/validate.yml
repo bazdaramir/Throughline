@@ -27,16 +27,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Published as annotations as well as log lines: annotations can be read without
+      # logging in to GitHub, and "passed" means little without knowing which awk.
       - name: Which tools are these scripts running on?
         run: |
-          echo "sh      -> $(command -v sh) $(sh --version 2>&1 | head -1)"
-          echo "awk     -> $(command -v awk) $( (awk --version || awk -W version || awk -version) 2>&1 | head -1)"
-          echo "sed     -> $(command -v sed)"
-          echo "find    -> $(command -v find)"
-          echo "xargs   -> $(command -v xargs)"
-          echo "git     -> $(git --version)"
-          echo "node    -> $(node --version)"
-          uname -a
+          note() { echo "$*"; echo "::notice title=tools::$*"; }
+          note "runner: $(uname -sm)"
+          note "sh -> $(readlink -f "$(command -v sh)" 2>/dev/null || command -v sh)"
+          note "bash: $(bash --version | head -1)"
+          note "awk: $( (awk --version || awk -W version || awk -version) 2>&1 | head -1)"
+          note "sed: $( (sed --version || sed -V) 2>&1 | head -1)"
+          note "grep: $(grep --version 2>&1 | head -1)"
+          note "find: $( (find --version || find -version) 2>&1 | head -1)"
+          note "xargs: $( (xargs --version) 2>&1 | head -1)"
+          note "git: $(git --version)"
+          note "node: $(node --version)"
 
       - name: sh tools/tl-validate
         run: |
