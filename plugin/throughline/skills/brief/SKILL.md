@@ -32,6 +32,11 @@ An area query is required — a Component name, a path, or a concept.
   code — the same test the SessionStart brief applies.
 - **Only `status: active` Decisions and `status: open` Gotchas.** Superseded and resolved notes are
   history; they belong to `/throughline:why`, not here.
+- **Count the drafts; never read them out.** If unreviewed drafts govern the area — a draft
+  Component that owns it, or a draft Decision or Gotcha whose `affects` names one of its Components —
+  end the brief with one line giving how many, by kind, and that `tl-promote` lists them. No title,
+  no id, no content: the SessionStart brief does exactly this, and this skill must say the same
+  thing in the same words, so the two never disagree about what is waiting.
 - **Never include Session note bodies.** Read only `open_threads` from the most recent Session on
   this branch. Session logs in context is precisely how context rot gets rebuilt inside the tool
   designed to prevent it.
@@ -88,8 +93,10 @@ Cite every source note as a wikilink so the user can jump to it. Roughly this sh
     [[G-0001 Redis TTL silently resets on SET]]  cost: 3h
       → write value and expiry in one command; never SET then EXPIRE
 
-  UNFINISHED
+  UNFINISHED (auto-captured from the last session, unreviewed)
     ⋯ "migration script untested against prod schema"
+
+  1 unreviewed draft(s) touch this area: 1 gotcha - not shown, not trusted. tl-promote lists them.
 
   Saved to 04 Briefs/2026-08-16-session-store.md
 ```

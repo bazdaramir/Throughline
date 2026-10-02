@@ -53,6 +53,11 @@ The SessionStart brief is assembled by deterministic path matching: `git` tells 
 
 No model runs. That means the brief is instant, costs nothing, and — the part that matters — **cannot invent a decision you never made.** It can only tell you things you actually wrote down. A model-generated brief could not make that promise.
 
+Two things in the brief are not knowledge, and it says so:
+
+- **A count of waiting drafts.** If unreviewed drafts would reach the brief once promoted — a draft Component that owns a changed file, or a draft Decision or Gotcha that governs one — the brief says how many, by kind: *"2 unreviewed draft(s) touch these files: 1 component, 1 gotcha — not shown, not trusted."* It never prints a title, an id, or a word of a draft. A count says that something waits; it says nothing about whether to believe it. Without it, a brief that is quiet because everything relevant is still a draft looks exactly like an empty vault.
+- **The last session's open threads.** The one channel into a future session that no human reviews: the distiller writes them from a transcript that may contain web pages or tool output. So they are labelled as unreviewed, capped at three, cut at 140 characters, and stripped of control characters.
+
 ---
 
 ## The draft quarantine

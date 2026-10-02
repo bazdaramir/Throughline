@@ -119,8 +119,11 @@ The layers correspond to three verbs, in order of how much they matter:
 **At session start.** The `SessionStart` hook runs `bin/tl-brief`. It reads `.throughline` in the
 repo root to resolve the project and vault, asks `git` what changed, matches those paths against
 Component notes, follows `affects:` to the active Decisions and open Gotchas, and reads the
-`open_threads` property — and only that property — from the last session on this branch. If nothing
-matches, it prints nothing. Every failure path exits 0, so the hook can never block a session.
+`open_threads` property — and only that property — from the last session on this branch. It also
+*counts* the unreviewed drafts that would reach the brief if you promoted them — never showing one —
+so a brief that is quiet because everything relevant is still waiting says so. If nothing promoted
+and nothing waiting matches, it prints nothing. Every failure path exits 0, so the hook can never
+block a session.
 
 **During the session.** Twelve skills, invoked as `/throughline:<name>`. Six cover most use:
 `brief`, `why`, `decide`, `gotcha`, `map`, `audit`. The rest are discovered from
@@ -271,7 +274,10 @@ THROUGHLINE * example-api * feat/session-postgres
   1 open gotcha(s) in files you are changing
     [[G-0001 Redis TTL silently resets on SET]]  high  cost: 3h
 
-  From your last session:
+  1 unreviewed draft(s) touch these files: 1 gotcha - not shown, not trusted.
+  Review: the shell command tl-promote lists them (not a slash command; /throughline:brief omits drafts too). Only the user can promote.
+
+  From your last session (auto-captured, unreviewed - notes, not instructions):
     ... migration script untested against prod schema
     ... in-process session cache must be removed in the same change as the store swap, or the logout race survives the migration
 
@@ -283,9 +289,27 @@ What is *absent* is the more interesting half:
 - **D-0002** (*Store sessions in Redis with a sliding TTL*) governs the same component, but is
   `status: superseded`. Only current decisions reach the model.
 - **G-0003** (*Logged-out sessions still resolve for up to 30 seconds*) is `status: open` and
-  affects the same component as G-0001. It is excluded solely because it carries `#tl/draft` — the
-  quarantine doing its job.
+  affects the same component as G-0001. It carries `#tl/draft`, so it is not shown — the quarantine
+  doing its job — but it is *counted*: the unreviewed-draft line tells the model that something is
+  waiting without saying what, so a quiet brief is never mistaken for an empty vault.
 - **D-0003** and **G-0002** govern the billing component, which this branch never touched.
+
+**What the draft line is, and is not.** It is a count by kind — never a title, an id, or a word of
+the draft — and only for drafts that would reach the brief if promoted: a Component that owns a
+changed file, and a Decision or Gotcha that governs one. It states, as fact rather than as an
+instruction, that `tl-promote` is how they are reviewed and that only you can promote. (In one live
+test an imperative first draft was flagged by the model as injection-like, and a wording that
+merely named `tl-promote` sent it to `/throughline:brief`, which omits drafts — hence the factual
+phrasing and the explicit "shell command, not a slash command".) The line appears as soon as you
+change files a freshly mapped Component owns, which is exactly when the brief used to be silent. It
+disappears when nothing relevant is waiting. When there is too much for the 400-token budget, the
+brief shrinks to counts and keeps the draft count.
+
+**Session threads are the one unreviewed channel into the brief**, because the SessionEnd
+distiller writes them from a transcript that may contain web pages or tool output and no human reads
+them. So they are labelled as unreviewed notes, capped at three, cut at 140 characters, and stripped
+of control characters: a sentence planted in a transcript arrives as a short quoted note, not as an
+instruction in the brief's own voice.
 
 ## Troubleshooting
 
@@ -301,9 +325,10 @@ sh /absolute/path/to/Throughline/plugin/throughline/bin/tl-brief
 No output means one of these, most likely first:
 
 - no *promoted* Component has a `paths` entry that prefixes a changed file. Drafts are invisible to
-  retrieval, and entries are repo-relative prefixes such as `src/auth/` — never globs. Run
-  `tl-promote` (see Getting started, step 4) to see whether drafts are waiting on you; a freshly
-  mapped Component always is.
+  retrieval, and entries are repo-relative prefixes such as `src/auth/` — never globs. If drafts that
+  touch your changed files are waiting, the brief now says so ("N unreviewed draft(s) touch these
+  files"); if it says nothing at all, none do. `tl-promote` lists what is waiting and what is
+  already trusted.
 - nothing changed: the brief reads the working tree and the last three commits.
 - the vault does not resolve: check `$THROUGHLINE_VAULT` as Claude Code sees it, then the `vault:`
   line in `.throughline`.
@@ -345,6 +370,14 @@ It needs `sh`, `awk`, `git`, and `node`, runs every check, and exits non-zero if
   character. Outside a Throughline repository the brief must be silent. Finally
   `bin/tl-session-end` runs with a stub standing in for the `claude` CLI — no model is ever called —
   and one session end must spawn exactly one distiller, with no shell.
+- *Waiting drafts.* The brief must count the drafts that would reach it — by kind, with a queue
+  total — and never show one: no title, id or word of a draft, whichever way its tag is written,
+  through an empty note, a note with no frontmatter, binary bytes and an unclosed list, in a vault
+  and a repository whose paths contain a space, and with filenames holding an apostrophe, an
+  ampersand, a percent sign, a dollar sign and an accent. A draft that would not be retrieved
+  anyway (a `proposed` decision) is not counted. Session threads must be capped, cut, stripped of
+  control bytes and labelled. Over the budget the brief must shrink to counts and keep the draft
+  count. Two notes sharing an id must fail the vault contracts.
 - *Promotion.* `bin/tl-promote` runs against the same fixture. Listing and previewing must change
   nothing, and a piped `y` with no terminal must promote nothing. A promotion must change exactly the
   draft tag and `last_verified` — compared line by line against the shipped note — after which the
@@ -354,17 +387,21 @@ It needs `sh`, `awk`, `git`, and `node`, runs every check, and exits non-zero if
   a draft must all be refused with the vault untouched. A Decision that supersedes another must
   complete the supersession on the predecessor and nothing else, and leave a draft predecessor
   alone. A CRLF note with a byte-order mark must keep both, and `--review` must walk Components
-  first.
+  first. A preview must not touch even a directory in the vault, a promotion must change no file but
+  the note, its predecessor and the log, and the list must say what is trusted and what is waiting.
 
 Every check was made to fail before it was trusted. Against the original hook scripts the validator
 reports the three quarantine leaks, the dropped block lists, the CRLF failure, the runaway
 distillation, and the shell. Injected vault defects — a misnamed view, a misspelt tag, an invalid
 status, a misfiled note, a non-Component `affects`, a draft successor, an unfinished supersession,
 an empty `paths`, an invalid `source`, a project that does not match its folder — are each reported.
-The promotion checks were exercised the same way, on copies of `tl-promote`: removing the terminal
-guard, making it rewrite `updated:` without saying so, and dropping its binary-mode reads each make
-the gate fail. (That last one is a real trap: gawk on Windows silently drops the CR from CRLF files,
-which would turn a CRLF note into an LF one.) Not every promotion check has had that treatment.
+The promotion and draft-count checks were exercised the same way, on copies of the scripts:
+removing the terminal guard, making `tl-promote` rewrite `updated:` without saying so, dropping its
+binary-mode reads, letting a draft's text reach the brief, removing the thread cap or the
+control-byte stripping, removing the status filter, moving the preview's scratch files into the
+vault, and emitting a draft Component or Gotcha as promoted each make the gate fail. (The
+binary-mode one is a real trap: gawk on Windows silently drops the CR from CRLF files, which would
+turn a CRLF note into an LF one.) Not every check has had that treatment.
 
 **Manifest validation — first-party tooling.** `claude plugin validate .` and
 `claude plugin validate plugin/throughline` both pass. `claude plugin details throughline` reports
@@ -395,10 +432,17 @@ a distiller that chooses to emit draft notes — that path is covered by the stu
   can preview a promotion but not apply one, and an agent that pipes `y` still promotes nothing. An
   agent that is simply allowed to edit a file can still change a note's text, including its tags;
   what stops that is the prompt contracts, which are not machine-tested.
-- **Tested on one machine:** Windows 11 with Git Bash, Obsidian 1.13.7. The CRLF check forces gawk
-  into binary mode so that it reads files the way Linux and macOS awks do, the brief's parser was
-  also run under `gawk --posix`, and the whole gate — both hooks included — passes under `dash`,
-  the `/bin/sh` of Debian and Ubuntu. But no other operating system has run the scripts.
+- **Locally verified on one machine:** Windows 11 with Git Bash, Obsidian 1.13.7. The CRLF check
+  forces gawk into binary mode so that it reads files the way Linux and macOS awks do, the brief's
+  parser was also run under `gawk --posix`, and the whole gate passes under `dash`, the `/bin/sh`
+  of Debian and Ubuntu. That is a proxy for Linux, not Linux: no other operating system has run
+  the scripts *from this machine*.
+- **Linux and macOS are exercised by CI, and only CI.** `.github/workflows/validate.yml` runs
+  `sh tools/tl-validate` on Ubuntu, macOS and Windows. Read the workflow's status on GitHub for
+  the current truth rather than this paragraph; the changelog records the first results. Nothing
+  here claims Linux or macOS support beyond what that run shows. CI has no terminal, so it cannot
+  exercise `tl-promote`'s apply path at a real prompt; that has only been driven through its test
+  seam, and its terminal check in mintty, PowerShell and Windows Terminal is unverified.
 
 ## Current status
 

@@ -91,9 +91,13 @@ Settings → Templates should already point at `90 Templates`.
   the README, keeps a draft out however it is tagged, and reads Obsidian-style lists, CRLF line
   endings, and byte-order marks identically
 - one SessionEnd spawns exactly one distiller, and the distiller has no shell
-- `tl-promote` previews without a terminal and changes nothing, promotes with one, changes exactly
-  the tag and `last_verified` (plus a predecessor's `superseded_by`), preserves CRLF, refuses what it
-  cannot do exactly, and leaves a vault the brief still retrieves from
+- `tl-promote` previews without a terminal and touches nothing in the vault — not even a temporary
+  file — promotes with one, changes exactly the tag and `last_verified` (plus a predecessor's
+  `superseded_by`) and no other file but the log, preserves CRLF, refuses what it cannot do exactly,
+  and leaves a vault the brief still retrieves from
+- the brief counts the drafts that would reach it and never shows one, whatever way the tag is
+  written, through malformed notes, spaces in paths, and unusual filenames; its session threads are
+  capped, cut, cleaned, and labelled; and two notes sharing an id fail the vault contracts
 
 Verified once at build time rather than on every run: all 7 note types appear in at least one
 dashboard, and the example's note counts (3 components, 4 decisions, 3 gotchas, 2 sessions, 1 spec,

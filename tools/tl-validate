@@ -195,6 +195,7 @@ for (const b of bases) {
 const targets = new Set([...mds.map(p => path.basename(p, '.md')), ...views.keys()]);
 
 const notes = new Map();
+const ids = new Map();
 for (const p of mds) {
   const r = rel(p), text = read(p), parsed = frontmatter(text);
   if (!parsed) { fail(r, 'no YAML frontmatter'); continue; }
@@ -226,6 +227,16 @@ for (const p of mds) {
   }
 
   if (template || !STATUS[type] || type === 'hub') continue;
+
+  // Ids are cited in commit messages and never reused. Two skills allocating
+  // "highest + 1" at the same moment can still collide, and from then on a
+  // reference to the id means two notes.
+  const idm = /^([CDGS]-\d+) /.exec(path.basename(p));
+  if (idm) {
+    const key = `${fm.project}/${idm[1]}`;
+    if (ids.has(key)) fail(r, `duplicate id ${idm[1]} - ${ids.get(key)} already has it`);
+    else ids.set(key, r);
+  }
 
   for (const key of REQUIRED[type] || []) {
     if (!filled(fm[key])) fail(r, `${type} needs a non-empty ${key}`);
@@ -426,7 +437,8 @@ if [ "$fixture_ok" = 1 ]; then
   say 'tl-promote makes promotion cheap without making it automatic'
   today=$(date +%Y-%m-%d)
   g3orig="$vault/01 Projects/example-api/Gotchas/G-0003 Logged-out sessions still resolve for up to 30 seconds.md"
-  vsum() { (cd "$fx" && find . -type f -print0 | sort -z | xargs -0 cksum); }
+  # Sorted after cksum, not with `sort -z`, which is not portable to every sort.
+  vsum() { (cd "$fx" && find . -type f -print0 | xargs -0 cksum | LC_ALL=C sort); }
   # `promote` stands in for a person at a terminal; `asagent` is what Claude Code's Bash tool is.
   promote() { (cd "$repo" && unset THROUGHLINE_DISTILLING && THROUGHLINE_VAULT="$fx" TL_PROMOTE_TEST_ASSUME_TTY=1 sh "$plugin/bin/tl-promote" "$@") 2>&1; }
   asagent() { (cd "$repo" && unset THROUGHLINE_DISTILLING && unset TL_PROMOTE_TEST_ASSUME_TTY && THROUGHLINE_VAULT="$fx" sh "$plugin/bin/tl-promote" "$@") 2>&1; }
@@ -569,6 +581,177 @@ if [ "$fixture_ok" = 1 ]; then
   sweep
 
   [ -z "$leftovers" ] && ok 'no temporary files are left behind' || bad "temporary files left:$leftovers"
+fi
+
+# ------------------------------------------ waiting drafts: counted, not shown ---
+# A silent brief used to mean either "nothing governs these files" or "everything
+# that does is still a draft", and nothing told the two apart. The brief now
+# COUNTS the drafts that would reach it if promoted. It must never show one: a
+# count says something waits, and says nothing about whether to believe it.
+if [ "$fixture_ok" = 1 ]; then
+  say ''
+  say 'The brief counts waiting drafts and never shows them'
+
+  # A second repository, with a space in its path on purpose, that changes only src/payments/.
+  repo2="$tmp/pay repo"
+  mkdir -p "$repo2/src/payments" && printf 'x\n' > "$repo2/src/payments/p.ts"
+  printf 'project: example-api\nvault: %s\n' "$fx" > "$repo2/.throughline"
+  git -C "$repo2" init -q >/dev/null 2>&1 \
+    && git -C "$repo2" -c core.autocrlf=false add -A >/dev/null 2>&1 \
+    && git -C "$repo2" -c user.name=tl-validate -c user.email=tl-validate@localhost -c commit.gpgsign=false \
+         -c core.hooksPath=.git/hooks commit -qm base >/dev/null 2>&1
+  printf 'y\n' >> "$repo2/src/payments/p.ts"
+  brief2() { (cd "$repo2" && unset THROUGHLINE_DISTILLING && THROUGHLINE_VAULT="$fx" sh "$plugin/bin/tl-brief") 2>/dev/null; }
+  promote2() { (cd "$repo2" && unset THROUGHLINE_DISTILLING && THROUGHLINE_VAULT="$fx" TL_PROMOTE_TEST_ASSUME_TTY=1 sh "$plugin/bin/tl-promote" "$@") 2>&1; }
+  mkdraft() { # mkdraft <folder> <file> <type> <status> <one extra frontmatter line>
+    printf -- '---\ntype: %s\nstatus: %s\nproject: example-api\ncreated: 2026-10-01\nupdated: 2026-10-01\nsource: agent\n%s\ntags:\n  - tl/draft\n---\n\n## Body\nSecret words that must never appear.\n' "$3" "$4" "$5" > "$proj/$1/$2"
+  }
+
+  fresh_vault
+  out=$(brief2)
+  [ -z "$out" ] && ok 'silent when nothing promoted and nothing waiting touches the changed files' || bad "expected silence, got: $out"
+
+  mkdraft Components 'C-0004 Payments gateway.md' component active 'paths: ["src/payments/"]'
+  out=$(brief2)
+  case "$out" in *'1 unreviewed draft(s) touch these files: 1 component - not shown, not trusted (2 waiting in all).'*) h=1 ;; *) h=0 ;; esac
+  case "$out" in *Payments*|*C-0004*|*Secret*) leak=1 ;; *) leak=0 ;; esac
+  [ "$h" = 1 ] && [ "$leak" = 0 ] && ok 'a freshly mapped Component no longer leaves the brief silent: counted, never shown' \
+    || bad "first-run brief wrong (hint=$h leak=$leak): $out"
+
+  mkdraft Decisions 'D-0005 Use idempotency keys.md' decision active 'affects: ["[[C-0004 Payments gateway]]"]'
+  mkdraft Gotchas 'G-0004 Duplicate charge after retry.md' gotcha open 'affects: ["[[C-0004 Payments gateway]]"]'
+  mkdraft Decisions 'D-0006 Maybe use a queue.md' decision proposed 'affects: ["[[C-0004 Payments gateway]]"]'
+  out=$(brief2)
+  want='3 unreviewed draft(s) touch these files: 1 component, 1 decision, 1 gotcha - not shown, not trusted (5 waiting in all).'
+  case "$out" in *Secret*|*idempotency*|*'Duplicate charge'*|*queue*) leak=1 ;; *) leak=0 ;; esac
+  case "$out" in *"$want"*) [ "$leak" = 0 ] && ok 'counts drafts by kind, ignores a draft that would not be retrieved, and reports the queue total' \
+                                            || bad 'a draft title or word reached the brief' ;;
+                 *) bad "wrong counts, wanted: $want  got: $out" ;; esac
+
+  printf 'y\n' | promote2 C-0004 >/dev/null
+  out=$(brief2)
+  want='2 unreviewed draft(s) touch these files: 1 decision, 1 gotcha - not shown, not trusted (4 waiting in all).'
+  case "$out" in *"$want"*) ok 'promoting the Component makes the drafts that hang off it relevant' ;; *) bad "after promoting the Component: $out" ;; esac
+  printf 'y\n' | promote2 D-0005 >/dev/null; printf 'y\n' | promote2 G-0004 >/dev/null
+  out=$(brief2)
+  case "$out" in *'[[D-0005 Use idempotency keys]]'*'[[G-0004 Duplicate charge after retry]]'*) shown=1 ;; *) shown=0 ;; esac
+  case "$out" in *unreviewed*draft*) still=1 ;; *) still=0 ;; esac
+  [ "$shown" = 1 ] && [ "$still" = 0 ] && ok 'once promoted the notes are shown, and the draft line goes away with the queue' \
+    || bad "after promoting everything (shown=$shown draft-line=$still): $out"
+
+  # Every way of writing the tag is counted as a draft, the same way it is excluded.
+  nbad=''
+  for shape in flowmix quoted scalar inline; do
+    fresh_vault
+    case $shape in
+      flowmix) g3tags 'tags: [tl/draft, tl/security]' ;;
+      quoted)  g3tags 'tags:
+  - "tl/draft"
+  - tl/security' ;;
+      scalar)  g3tags 'tags: tl/draft' ;;
+      inline)  sed '/^  - tl\/draft$/d' "$g3orig" | awk '{ print } /^## Symptom$/ { print "Unconfirmed. #tl/draft" }' > "$g3" ;;
+    esac
+    case "$(brief)" in *'1 unreviewed draft(s) touch these files: 1 gotcha'*) ;; *) nbad="$nbad $shape" ;; esac
+  done
+  [ -z "$nbad" ] && ok 'every way of writing the draft tag is counted, not shown' || bad "tag shapes not counted:$nbad"
+
+  # Malformed notes fail safe: nothing crashes, nothing leaks, nothing is invented.
+  fresh_vault
+  : > "$proj/Components/C-0009 Empty.md"
+  printf 'just words, no frontmatter at all\n' > "$proj/Decisions/D-0009 Plain.md"
+  printf -- '---\ntype: gotcha\n\000\000\377\376\n---\n' > "$proj/Gotchas/G-0009 Binary.md"
+  printf -- '---\ntype: component\nstatus: active\npaths: [unclosed\n' > "$proj/Components/C-0010 Unclosed.md"
+  out=$(brief); rc=$?
+  [ $rc -eq 0 ] && [ "$out" = "$(cat "$tmp/expected")" ] && ok 'an empty note, one with no frontmatter, binary bytes, and an unclosed list change nothing' \
+    || bad "malformed notes changed the brief (exit $rc)"
+
+  # Paths with spaces, for both the vault and the repository.
+  mkdir "$tmp/my vault" && cp -R "$vault" "$tmp/my vault/Throughline"; sv="$tmp/my vault/Throughline"
+  out=$(cd "$repo" && unset THROUGHLINE_DISTILLING && THROUGHLINE_VAULT="$sv" sh "$plugin/bin/tl-brief" 2>/dev/null)
+  [ "$out" = "$(cat "$tmp/expected")" ] && ok 'a vault path with a space is read correctly' || bad 'a vault path with a space changed the brief'
+  out=$(cd "$repo" && printf 'y\n' | THROUGHLINE_VAULT="$sv" TL_PROMOTE_TEST_ASSUME_TTY=1 sh "$plugin/bin/tl-promote" G-0003 2>&1)
+  out=$(cd "$repo" && unset THROUGHLINE_DISTILLING && THROUGHLINE_VAULT="$sv" sh "$plugin/bin/tl-brief" 2>/dev/null)
+  case "$out" in *'[[G-0003 '*) ok 'promotion works in a vault path with a space, and the brief then shows the note' ;; *) bad 'promotion failed in a vault path with a space' ;; esac
+
+  # Filenames with an apostrophe, an ampersand, a percent sign, a dollar sign, parentheses and an accent.
+  fresh_vault
+  ni=$(printf 'na\303\257ve')
+  t7="D-0007 Cache user's data & 100% of \$HOME ($ni), fast"
+  t8="D-0008 Don't re-key & 50% of \$HOME ($ni)"
+  printf -- '---\ntype: decision\nstatus: active\nproject: example-api\ncreated: 2026-10-01\nupdated: 2026-10-01\nsource: human\naffects: ["[[C-0002 Session store]]"]\nconfidence: high\nlast_verified: 2026-10-01\n---\n\n## Decision\nx\n' > "$proj/Decisions/$t7.md"
+  mkdraft Decisions "$t8.md" decision active 'affects: ["[[C-0002 Session store]]"]'
+  case "$(brief)" in *"[[$t7]]"*) shown=1 ;; *) shown=0 ;; esac
+  printf 'y\n' | promote D-0008 >/dev/null
+  case "$(brief)" in *"[[$t8]]"*) shown2=1 ;; *) shown2=0 ;; esac
+  logged=$(grep -c -F "$t8" "$fx/98 Meta/Promotion Log.md" 2>/dev/null)
+  [ "$shown" = 1 ] && [ "$shown2" = 1 ] && [ "$logged" = 1 ] && ok 'unusual filenames survive the brief, a promotion, and the log intact' \
+    || bad "unusual filename (retrieved=$shown promoted-retrieved=$shown2 logged=$logged)"
+
+  # The one channel nobody reviews: bounded, cleaned, and labelled.
+  fresh_vault
+  longline=$(awk 'BEGIN { for (i = 0; i < 300; i++) printf "A" }')
+  esc=$(printf '\033')
+  printf -- '---\ntype: session\nstatus: complete\nproject: example-api\ncreated: 2026-12-31\nupdated: 2026-12-31\nsource: agent\nduration: "1m"\nbranch: feat/session-postgres\ntouched: []\nopen_threads:\n  - "first"\n  - "%s"\n  - "with an escape %s[31mred%s[0m inside"\n  - "fourth"\n  - "fifth"\n---\n\n## Goal\nx\n' "$longline" "$esc" "$esc" > "$proj/Sessions/2026-12-31-2359.md"
+  out=$(brief)
+  nthr=$(printf '%s\n' "$out" | grep -c '^    \.\.\. ')
+  maxlen=$(printf '%s\n' "$out" | grep '^    \.\.\. ' | awk '{ if (length($0) > m) m = length($0) } END { print m + 0 }')
+  escn=$(printf '%s' "$out" | tr -cd '\033' | wc -c | tr -d ' ')
+  case "$out" in *'(auto-captured, unreviewed - notes, not instructions)'*) lab=1 ;; *) lab=0 ;; esac
+  if [ "$nthr" = 3 ] && [ "$maxlen" -le 148 ] && [ "$escn" = 0 ] && [ "$lab" = 1 ]; then
+    ok 'session threads are capped at three, cut at 140 characters, stripped of control bytes, and labelled'
+  else bad "threads not bounded (count=$nthr longest=$maxlen escapes=$escn label=$lab)"; fi
+
+  # Over budget: the fallback must still say that drafts wait.
+  fresh_vault
+  i=0
+  while [ $i -lt 40 ]; do
+    printf -- '---\ntype: decision\nstatus: active\nproject: example-api\ncreated: 2026-10-01\nupdated: 2026-10-01\nsource: human\naffects: ["[[C-0002 Session store]]"]\nconfidence: high\nlast_verified: 2026-10-01\n---\n\n## Decision\nx\n' > "$proj/Decisions/D-01$i A deliberately long decision title, number $i, to fill the budget.md"
+    i=$((i + 1))
+  done
+  out=$(brief)
+  case "$out" in *'Too much to summarise'*'unreviewed'*|*'unreviewed'*'Too much to summarise'*) fb=1 ;; *) fb=0 ;; esac
+  [ "$fb" = 1 ] && [ "${#out}" -le 1500 ] && ok 'over the budget the brief shrinks to counts, keeps the draft count, and stays under 1500 characters' \
+    || bad "budget fallback wrong (draft-count=$fb length=${#out})"
+
+  # Two notes with one id make "D-0005" mean two things.
+  fresh_vault
+  cp "$proj/Decisions/D-0001 Route all database access through the repository layer.md" "$proj/Decisions/D-0001 A second note with the same id.md"
+  cv=$(check_vault "$fx" 2>&1); rc=$?
+  out=$(printf 'y\n' | promote D-0001); prc=$?
+  if [ $rc -ne 0 ] && case "$cv" in *'duplicate id D-0001'*) true ;; *) false ;; esac && [ $prc -eq 2 ]; then
+    ok 'a duplicated id fails the vault contracts, and tl-promote refuses to guess which note was meant'
+  else bad "duplicate id not caught (contracts exit $rc, promote exit $prc)"; fi
+fi
+
+# --------------------------------------------- the review loop, read-only until yes ---
+if [ "$fixture_ok" = 1 ]; then
+  say ''
+  say 'tl-promote shows what is trusted, and touches nothing until you say yes'
+
+  fresh_vault
+  : > "$tmp/marker"; sleep 2
+  asagent </dev/null >/dev/null; asagent G-0003 </dev/null >/dev/null; printf 'y\n' | asagent G-0003 >/dev/null
+  touched=$(find "$fx" -newer "$tmp/marker" 2>/dev/null)
+  [ -z "$touched" ] && ok 'listing and previewing touch nothing in the vault - not even a temporary file' || bad "touched by a preview: $touched"
+
+  out=$(asagent </dev/null)
+  case "$out" in
+    *'Trusted   3 components, 4 decisions, 2 gotchas, 1 spec (1 decision(s) superseded)'*'Waiting   1 draft(s): 1 gotcha'*) ok 'the list says what is trusted and what is waiting' ;;
+    *) bad "summary wrong: $out" ;;
+  esac
+  printf 'y\n' | promote G-0003 >/dev/null
+  out=$(asagent </dev/null)
+  case "$out" in
+    *'3 gotchas'*'Waiting   nothing'*'Promoted  '*'G-0003 '*) ok 'after a promotion the list shows the new trust and the recent promotion' ;;
+    *) bad "summary after promotion wrong: $out" ;;
+  esac
+
+  fresh_vault; mk_d5
+  before=$(vsum); printf 'y\n' | promote D-0005 >/dev/null; after=$(vsum)
+  changed=$(printf '%s\n%s\n' "$before" "$after" | sort | uniq -u | sed 's/^[0-9]* [0-9]* //' | sort -u)
+  want=$(printf '%s\n' './01 Projects/example-api/Decisions/D-0004 Move session storage to Postgres.md' \
+                       './01 Projects/example-api/Decisions/D-0005 Use idempotency keys.md' './98 Meta/Promotion Log.md' | sort)
+  [ "$changed" = "$want" ] && ok 'a promotion touches the note, its predecessor, and the log - no other file' || bad "files changed: $changed"
 fi
 
 # ---------------------------------------------------- distillation guard ---

@@ -1,0 +1,54 @@
+name: validate
+
+# Runs the repository's own gate on the three platforms Claude Code runs on. The
+# scripts are POSIX sh and awk, so the interesting differences are the userland:
+#   ubuntu   dash as /bin/sh, mawk or gawk as awk, GNU find/sed/xargs
+#   macos    bash 3.2 as sh, BSD awk, BSD sed/find/xargs
+#   windows  Git Bash (MSYS), gawk, CRLF checkouts unless .gitattributes forbids them
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: tl-validate (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Which tools are these scripts running on?
+        run: |
+          echo "sh      -> $(command -v sh) $(sh --version 2>&1 | head -1)"
+          echo "awk     -> $(command -v awk) $( (awk --version || awk -W version || awk -version) 2>&1 | head -1)"
+          echo "sed     -> $(command -v sed)"
+          echo "find    -> $(command -v find)"
+          echo "xargs   -> $(command -v xargs)"
+          echo "git     -> $(git --version)"
+          echo "node    -> $(node --version)"
+          uname -a
+
+      - name: sh tools/tl-validate
+        run: |
+          set +e
+          sh tools/tl-validate > validate.log 2>&1
+          code=$?
+          cat validate.log
+          # Failures become annotations, which are readable without logging in.
+          grep -E '^  FAIL' validate.log | head -40 | while IFS= read -r line; do
+            echo "::error title=tl-validate::${line}"
+          done
+          oks=$(grep -c '^  ok ' validate.log)
+          fails=$(grep -c '^  FAIL' validate.log)
+          echo "::notice title=tl-validate result::${oks} ok, ${fails} FAIL, exit ${code}"
+          exit $code

@@ -95,7 +95,23 @@ pdir="$vault/01 Projects/$proj"
 
 is_tty() { [ -n "${TL_PROMOTE_TEST_ASSUME_TTY:-}" ] || { [ -t 0 ] && [ -t 1 ]; }; }
 
-cleanup() { find "$pdir" -name ".tl-promote-$$.*" -exec rm -f {} + 2>/dev/null; }
+# Listing and previewing must leave the vault exactly as it was - not even a
+# temporary file that is deleted a moment later. Every working copy therefore
+# lives in a private scratch directory outside the vault. Only an APPLIED change
+# writes into the vault, and it does so with a temp file beside its target and an
+# atomic rename, so a note is never left half-written.
+scratch=''
+mkscratch() {
+  [ -z "$scratch" ] || return 0
+  scratch=$(mktemp -d 2>/dev/null) && [ -d "$scratch" ] && return 0
+  scratch="${TMPDIR:-/tmp}/tl-promote.$$"
+  mkdir "$scratch" 2>/dev/null || { err "cannot create a scratch directory"; exit 1; }
+}
+cleanup() {
+  if [ -n "$scratch" ] && [ -d "$scratch" ]; then rm -f "$scratch"/* 2>/dev/null; rmdir "$scratch" 2>/dev/null; fi
+  find "$pdir" -name ".tl-promote-$$.*" -exec rm -f {} + 2>/dev/null
+  return 0
+}
 trap cleanup EXIT
 trap 'cleanup; exit 1' INT TERM
 
@@ -348,12 +364,38 @@ warnings_for() { # $1 = type dir, $2 = affects (;-joined), $3 = confidence, $4 =
 }
 
 # ------------------------------------------------------------------ listing ---
+plural() { if [ "$1" = 1 ]; then printf '%s %s' "$1" "$2"; else printf '%s %ss' "$1" "$2"; fi; }
+
+# "3 components, 1 decision" - only the kinds that are present.
+kinds() { # kinds <components> <decisions> <gotchas> <specs>
+  out=''
+  for kv in "$1 component" "$2 decision" "$3 gotcha" "$4 spec"; do
+    k_n=${kv%% *}; k_w=${kv#* }
+    [ "$k_n" -gt 0 ] || continue
+    out="${out:+$out, }$(plural "$k_n" "$k_w")"
+  done
+  printf '%s' "$out"
+}
+
 do_list() {
   n=0; body=''
+  t_c=0; t_d=0; t_dsup=0; t_g=0; t_gopen=0; t_s=0   # trusted: no tl/draft
+  w_c=0; w_d=0; w_g=0; w_s=0                         # waiting: drafts
   while IFS=$US read -r r_path r_draft r_src r_conf r_created r_status r_aff r_sup r_inline r_tagsbad r_says r_paths; do
-    [ -n "$r_path" ] && [ "$r_draft" = 1 ] || continue
-    n=$((n + 1))
+    [ -n "$r_path" ] || continue
     dir=${r_path%/*}; dir=${dir##*/}
+    if [ "$r_draft" = 1 ]; then
+      case "$dir" in Components) w_c=$((w_c + 1)) ;; Decisions) w_d=$((w_d + 1)) ;; Gotchas) w_g=$((w_g + 1)) ;; Specs) w_s=$((w_s + 1)) ;; esac
+    else
+      case "$dir" in
+        Components) t_c=$((t_c + 1)) ;;
+        Decisions)  t_d=$((t_d + 1)); [ "$r_status" != superseded ] || t_dsup=$((t_dsup + 1)) ;;
+        Gotchas)    t_g=$((t_g + 1)); [ "$r_status" != open ] || t_gopen=$((t_gopen + 1)) ;;
+        Specs)      t_s=$((t_s + 1)) ;;
+      esac
+      continue
+    fi
+    n=$((n + 1))
     line=$(printf '  %-7s %-46s %-9s %s' "$(note_id "$r_path")" "$(clip 46 "$(note_title "$r_path")")" "${r_src:-?}" "${r_created:-}")
     [ -z "$r_conf" ] || line="$line  confidence: $r_conf"
     body="$body$line$NL"
@@ -369,12 +411,23 @@ EOW
 $ROWS
 EOF
   printf '\nTHROUGHLINE * promote * %s\n\n' "$proj"
+  # What the brief can draw on, what is waiting, and what changed lately.
+  trusted=$(kinds "$t_c" "$t_d" "$t_g" "$t_s")
+  [ "$t_dsup" -eq 0 ] || trusted="$trusted ($t_dsup decision(s) superseded)"
+  printf '  Trusted   %s\n' "${trusted:-nothing yet - the brief has nothing to draw on}"
+  printf '  Waiting   %s\n' "$([ "$n" = 0 ] && printf 'nothing' || printf '%s draft(s): %s' "$n" "$(kinds "$w_c" "$w_d" "$w_g" "$w_s")")"
+  # Newest first. awk reverses the three lines: tac and tail -r are not portable.
+  recent=$(grep -F "($proj);" "$vault/98 Meta/Promotion Log.md" 2>/dev/null | grep '^- ' | tail -3 \
+    | sed -n 's/^- \([0-9-]*\) - promoted `\([^`]*\)`.*/\1  \2/p' \
+    | awk '{ a[NR] = $0 } END { for (i = NR; i >= 1; i--) print a[i] }')
+  [ -z "$recent" ] || printf '%s\n' "$recent" | sed -e '1s/^/  Promoted  /' -e '2,$s/^/            /'
+  printf '\n'
   if [ "$n" = 0 ]; then
     printf '  No drafts awaiting review. Nothing is waiting on you.\n\n'
     return 0
   fi
-  printf '  %s draft(s) awaiting review. Promote Components first: a Decision or Gotcha\n' "$n"
-  printf '  reaches the brief only through a promoted Component.\n\n'
+  printf '  Promote Components first: a Decision or Gotcha reaches the brief only through a\n'
+  printf '  promoted Component.\n\n'
   printf '%s\n' "$body"
   printf '  Look at one:     sh "%s" <id>\n' "$SELF"
   printf '  Walk them all:   sh "%s" --review     (in your own terminal)\n\n' "$SELF"
@@ -452,13 +505,14 @@ EOF
     return 4
   fi
 
-  tmp="${file%/*}/.tl-promote-$$.a"
-  awk -v BINMODE=3 -v Q="'" -v BOM="$BOM" -v DATE="$today" "$AWK_PROMOTE" "$file" > "$tmp" 2>"$tmp.err"
+  mkscratch
+  tmp="$scratch/a"
+  awk -v BINMODE=3 -v Q="'" -v BOM="$BOM" -v DATE="$today" "$AWK_PROMOTE" "$file" > "$tmp" 2>"$scratch/err"
   rc=$?
   if [ "$rc" != 0 ]; then
-    err "$id cannot be rewritten safely: $(cat "$tmp.err" 2>/dev/null)"; rm -f "$tmp" "$tmp.err"; return 4
+    err "$id cannot be rewritten safely: $(cat "$scratch/err" 2>/dev/null)"; rm -f "$tmp" "$scratch/err"; return 4
   fi
-  rm -f "$tmp.err"
+  rm -f "$scratch/err"
   after=$(scan_file "$tmp")
   IFS=$US read -r a_path a_draft _ <<EOF
 $after
@@ -491,7 +545,7 @@ EOF
       elif [ "$p_status" != active ] && [ "$p_status" != proposed ]; then
         sup_why="it supersedes $(note_id "$pf"), whose status is $p_status. Nothing was marked superseded."
       else
-        sup_tmp="${pf%/*}/.tl-promote-$$.b"
+        sup_tmp="$scratch/b"
         awk -v BINMODE=3 -v BOM="$BOM" -v LINK="[[$(note_name "$file")]]" "$AWK_SUPERSEDE" "$pf" > "$sup_tmp" 2>/dev/null \
           && sup_note=$pf || { sup_why="$(note_id "$pf") has no status line to rewrite. Nothing was marked superseded."; rm -f "$sup_tmp"; sup_tmp=''; }
       fi
@@ -535,14 +589,22 @@ EOF
     *)      rm -f "$tmp" "$sup_tmp"; printf '  Nothing changed.\n\n'; return 0 ;;
   esac
 
-  mv -f "$tmp" "$file" || { err "could not write $file"; rm -f "$tmp" "$sup_tmp"; return 4; }
+  # The only writes into the vault: a temp file beside the target, then a rename.
+  stage="${file%/*}/.tl-promote-$$.x"
+  if ! { cat "$tmp" > "$stage" && mv -f "$stage" "$file"; }; then
+    err "could not write $file"; rm -f "$stage" "$tmp" "$sup_tmp"; return 4
+  fi
+  rm -f "$tmp"
   extra=''
   if [ -n "$sup_note" ]; then
-    if mv -f "$sup_tmp" "$sup_note"; then extra="completed the supersession of \`$(note_name "$sup_note")\`"
+    stage="${sup_note%/*}/.tl-promote-$$.y"
+    if { cat "$sup_tmp" > "$stage" && mv -f "$stage" "$sup_note"; }; then
+      extra="completed the supersession of \`$(note_name "$sup_note")\`"
     else
       err "$id is promoted, but $(note_id "$sup_note") could not be updated. Set status: superseded and superseded_by: \"[[$(note_name "$file")]]\" on it by hand."
-      rm -f "$sup_tmp"
+      rm -f "$stage"
     fi
+    rm -f "$sup_tmp"
   fi
   log_promotion "$file" "$r_src" "$r_conf" "$extra"
   printf '  Promoted %s. It is now eligible for retrieval.\n\n' "$id"

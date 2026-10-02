@@ -38,33 +38,43 @@ organisation can approve. That is the thing to build on.
 
 ## NOW
 
-**Stage 2 — `tl-promote`: make the human review cheap.** *(done in this release — see the changelog,
-v0.1.8)* Lists drafts, previews the exact edit, applies only with a person at a terminal, walks the
-queue with `--review`, completes supersessions, and records each promotion in an append-only log.
-Why first: it is the single biggest gap between "correct" and "usable", and it makes the main
-differentiator — the quarantine — cheap to operate instead of a chore.
+**Stage 3 — make the review loop visible and trustworthy.** *(this release — changelog v0.1.9)*
+Capture → quarantine → human review → retrieval only feels natural if each step can be seen.
+- The brief **counts** the unreviewed drafts that would reach it, never showing one, so a quiet
+  brief is no longer mistaken for an empty vault.
+- `tl-promote` says what is **trusted**, what is **waiting**, and what was **recently promoted**.
+- Previewing is now **truly read-only**: no temporary file is written into the vault.
+- The one channel into a future session that no human reviews — the distiller's `open_threads` —
+  is **labelled, capped and cleaned**.
+- Two notes sharing an id now **fail the vault contracts**.
+- **CI** runs the gate on Linux, macOS and Windows, so portability is measured rather than assumed.
+
+Stage 2 (`tl-promote`) shipped in v0.1.8: lists drafts, previews the exact edit, applies only with a
+person at a terminal, walks the queue, completes supersessions, and logs each promotion.
 
 ## NEXT
 
-1. **Make the silent brief explain itself.** A freshly mapped Component is a draft, so the brief is
-   silent, and silence looks like "broken". Print one line — a *count* of unreviewed drafts that
-   touch the changed files, never their content — pointing at `tl-promote`. Preserves the
-   guarantee (no draft content reaches the model); changes the brief's output contract, so it needs
-   the README example and its test updated together. Risk: a line on every session while drafts wait
-   could annoy; cap it, and make it vanish when the queue is empty.
-2. **CI on Linux, macOS and Windows.** Run `sh tools/tl-validate` on each. Turns "tested on one
-   machine" into evidence, and will find real BSD `sed`/`awk` portability bugs, which is the point.
-3. **Find `.throughline` from a subdirectory.** Both hooks and `tl-promote` look only in the current
+1. **Fix whatever CI finds.** Until the first matrix run, "tested on one machine" is still the
+   honest summary. BSD `sed`/`awk`/`find`/`xargs` and macOS bash 3.2 are the likeliest sources.
+2. **Verify `tl-promote` at a real terminal on Windows.** The apply path has only been exercised
+   through its test seam. Whether the `-t 0`/`-t 1` check behaves in mintty, PowerShell and Windows
+   Terminal is untested, and no CI runner has a terminal.
+3. **Share the draft detector.** The rule for "is this a draft" exists in both `tl-brief` and
+   `tl-promote`. The validator promotes a note and checks the brief then retrieves it, for several
+   tag shapes, which catches drift but is no substitute for one implementation.
+4. **Find `.throughline` from a subdirectory.** Both hooks and `tl-promote` look only in the current
    directory, so Claude Code started in `src/` gets no brief and no distillation. Walk up to the git
    root. Decide, and document, whether `resume` and `compact` sessions should get a brief.
-4. **Validate any vault, not just the one in this repo.** The contract checks (status per type,
-   folder per type, `affects` names a Component, supersession recorded on both notes) would catch a
-   hand edit that silently takes a note out of retrieval. Ship them as a command a user can run on
-   their own vault.
-5. **Per-project weekly review.** `/throughline:week` writes into one global `Today.md`, so a
+5. **Validate any vault, not just the one in this repo.** The contract checks (status per type,
+   folder per type, `affects` names a Component, supersession recorded on both notes, unique ids)
+   would catch a hand edit that silently takes a note out of retrieval. Ship them as a command a
+   user can run on their own vault.
+6. **Per-project weekly review.** `/throughline:week` writes into one global `Today.md`, so a
    multi-project vault would overwrite itself. Needs a contract decision before code.
-6. **A tool-restricted auditor.** The auditor's "flags, never modifies" guarantee rests on a prompt
+7. **A tool-restricted auditor.** The auditor's "flags, never modifies" guarantee rests on a prompt
    while it holds Bash. Pre-collect the git facts it needs, as the distiller now does, and drop Bash.
+8. **Stop two writers allocating the same id.** The validator now detects a duplicate; nothing yet
+   prevents one. `decide`, `gotcha`, `map` and the distiller each take "highest + 1".
 
 ## LATER
 
@@ -109,7 +119,13 @@ differentiator — the quarantine — cheap to operate instead of a chore.
 - **A database, a daemon, or an MCP server.** The product's advantage over heavier tools is that it
   is local, inspectable Markdown and shell. Nothing on this roadmap needs more.
 - **A drafts hint that shows draft content in the brief.** Showing even a title crosses the
-  quarantine. Counts only.
+  quarantine. Counts only — and that is what shipped.
+- **Ids or titles in the brief's draft line.** Considered, because it would help the user find them.
+  Rejected: the line goes into a model's context, and the model can read any file it is pointed at.
+  The user finds them with `tl-promote`, which is not in the model's context.
+- **Dropping `open_threads` from the brief.** It is the product's best continuity feature ("last
+  time you left the migration untested"). The risk is that nobody reviews it, so it is bounded and
+  labelled rather than removed.
 - **Fixing every vault problem on promotion** (renaming, retitling, merging duplicates). A
   promotion that does more than it says is a promotion nobody can trust. It edits the tag, the
   verification date, and a supersession, and it says so.

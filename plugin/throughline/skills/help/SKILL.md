@@ -79,7 +79,9 @@ alternative is in `98 Meta/How Throughline Works.md`.
 
 - **At session start**, a brief is assembled from the files you have been changing — the decisions
   and open landmines that govern them. It is built by path matching, not by a model, so it is
-  instant and *cannot invent a decision you never wrote*.
+  instant and *cannot invent a decision you never wrote*. If unreviewed drafts touch those files, it
+  *counts* them without showing them, so a quiet brief is never mistaken for an empty vault; that is
+  your cue to run `tl-promote`. The "last session" lines it carries are labelled as unreviewed.
 - **At session end**, if the session was substantial, the log is distilled in the background. Your
   session ends immediately; the note appears a minute later. Most sessions correctly produce
   nothing but the log.
