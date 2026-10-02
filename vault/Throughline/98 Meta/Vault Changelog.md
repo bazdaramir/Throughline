@@ -86,10 +86,19 @@ The next run, on the fix (`8c257d5`), passed everywhere:
 | `windows-latest` | 72 ok, 0 FAIL |
 
 That confirms the diagnosis (the same code, with only the heredoc moved into a function, now
-parses). It does **not** say which `awk`, `sed` or shell each runner used — the job logs need a
-GitHub login to read — so the workflow now publishes them as annotations, which do not. The runner
-labels float, so a green run is a dated fact, not a standing guarantee. CI has no terminal and
-cannot test `tl-promote`'s apply path at a real prompt.
+parses). The workflow publishes the runners' tool versions as annotations, readable without a
+GitHub login; for the run on `8e40c25`, which also passed 72/72 everywhere:
+
+| Runner | `sh` | `awk` | userland |
+|---|---|---|---|
+| `ubuntu-latest` | dash | **GNU Awk 5.2.1** | GNU sed 4.9, find/xargs 4.9.0, grep 3.11; bash 5.2.21 |
+| `macos-latest` (Darwin arm64) | `/bin/sh` = **bash 3.2.57** | **BSD awk 20200816** | BSD sed, find, xargs and grep |
+| `windows-latest` (Git Bash / MSYS) | MSYS sh | GNU Awk 5.4.1 | GNU sed 4.9, find/xargs 4.11.0; bash 5.3.15 |
+
+macOS is the strictest of the three, and it passes. **Not covered:** `mawk`, the default awk on
+Debian and Ubuntu installs (the Ubuntu runner ships gawk instead), busybox awk and sed as on
+Alpine, and `zsh` as `sh`. The runner labels float, so a green run is a dated fact, not a standing
+guarantee. CI has no terminal and cannot test `tl-promote`'s apply path at a real prompt.
 
 **What a benchmark found.** The first version of the draft count read every note a second time and
 split the results with `sed` and `grep`: about fifteen extra processes. On a vault of 814 notes

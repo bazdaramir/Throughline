@@ -57,9 +57,11 @@ person at a terminal, walks the queue, completes supersessions, and logs each pr
 
 ## NEXT
 
-1. **Watch CI, and widen it where it is thin.** It runs the three `*-latest` runners with whatever
-   awk they ship. Not covered: a strict POSIX awk such as busybox's (Alpine), `zsh` as `sh`, and an
-   older macOS than the runner's. The first run already earned its place by finding a real bug.
+1. **Widen CI where it is thin.** The three `*-latest` runners ship gawk (Ubuntu, Windows) and BSD
+   awk (macOS). Not covered: **`mawk`**, the default awk on many Debian and Ubuntu installs;
+   busybox awk and sed (Alpine); `zsh` as `sh`; and an older macOS than the runner's. A job that
+   installs `mawk`, and one in an `alpine` container, would close most of that. The first run
+   already earned its place by finding a real bug.
 2. **Verify `tl-promote` at a real terminal on Windows.** The apply path has only been exercised
    through its test seam. Whether the `-t 0`/`-t 1` check behaves in mintty, PowerShell and Windows
    Terminal is untested, and no CI runner has a terminal.

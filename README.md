@@ -441,9 +441,11 @@ a distiller that chooses to emit draft notes — that path is covered by the stu
   `sh tools/tl-validate` on GitHub's `ubuntu-latest`, `macos-latest` and `windows-latest` runners.
   The gate (72 checks) passed on all three at commit `8c257d5`. Its first run did not: macOS failed
   because `bin/tl-session-end` did not parse under bash 3.2, a bug that would have silently disabled
-  distillation on macOS (changelog v0.1.9). The runners' labels float, and the exact `awk`, `sed`
-  and shell versions are published as annotations on each run rather than recorded here. Read the
-  workflow's current status on GitHub for the truth; this paragraph is a dated claim. CI has no
+  distillation on macOS (changelog v0.1.9). What passed: Ubuntu with dash and GNU Awk 5.2.1; macOS
+  with bash 3.2.57 as `sh` and BSD awk 20200816; Windows with Git Bash and GNU Awk 5.4.1. What did
+  not run: `mawk` (the default awk on many Debian and Ubuntu installs — the runner ships gawk),
+  busybox (Alpine), and `zsh` as `sh`. The runners' labels float, so read the workflow's current
+  status on GitHub for the truth; this paragraph is a dated claim. CI has no
   terminal, so it cannot exercise `tl-promote`'s apply path at a real prompt: that has only been
   driven through its test seam, and its terminal check in mintty, PowerShell and Windows Terminal
   is unverified.
