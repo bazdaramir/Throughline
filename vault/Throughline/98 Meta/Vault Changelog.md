@@ -3,13 +3,49 @@ type: hub
 status: active
 project: global
 created: 2026-08-13
-updated: 2026-09-15
+updated: 2026-10-02
 source: human
 ---
 
 # Vault Changelog
 
 Versioned record of what changed in the vault, and — more importantly — **every place the shipped vault departs from the blueprint specification, with the reason.** Nothing is dropped silently.
+
+---
+
+## v0.1.7 — 2026-10-02 — Release state aligned: one license, one installed version
+
+No change to the vault's structure, retrieval, or any hook or skill behaviour.
+
+**The repository contradicted itself about its own license.** An Apache-2.0 `LICENSE` was added on
+GitHub after v0.1.6, but `plugin.json` still declared `Commercial` and the README still said the
+project was not licensed for redistribution. Both now say Apache-2.0, the v0.1.5 note that flagged
+the gap points here, and the working tree now carries the `LICENSE` file.
+
+**The installed plugin was stale.** The copy that Claude Code actually runs hooks from is a cache
+created at install time, and it was still 0.3.0 — without the recursion guard or the shell-less
+distiller from v0.1.6 — while the repository was at 0.3.1. Updating through
+`claude plugin marketplace update` and `claude plugin update` brought the cache to 0.3.1, and every
+file in it is byte-identical to `plugin/throughline/`. Committing a fix does not deploy it: after any
+change under `plugin/throughline/`, the installed copy needs the same two commands and a restart.
+
+**Verified live.** The distiller's launch was changed in v0.1.6 and had only been exercised against
+a stub CLI. With the CLI logged in again, one real headless session — six tool calls, a dirty tree,
+run in an isolated scratch repo and a scratch copy of the vault, with the real vault compared before
+and after — produced exactly one Session note. Its frontmatter and five headings were valid, its
+filename carried the local start time (the machine is UTC+03:30, so a UTC filename would have been
+visibly wrong), no second distillation followed, and the log shows the hook's guards passing and a
+single spawn. All 13 checks passed against the installed 0.3.1 plugin.
+
+What that run did **not** show, so it should not be read as more than it is:
+
+- It was a trivial session, and the distiller correctly wrote no Decision, Gotcha, or Component. The
+  live quarantine of *extra* notes is therefore still covered only by the stub and by the brief's own
+  tests, not by a live distiller that chose to emit one.
+- It does not show the distiller's tool restriction. The "blocked Bash" line in its output is the
+  scratch session's own attempt, described in the Session note it wrote.
+- One wrinkle: the distiller wrote `touched` as a list of file paths, where the note-type reference
+  describes links to what the session touched. Nothing consumes the field yet, so nothing broke.
 
 ---
 
@@ -167,7 +203,8 @@ syntax, and treating them as links produced three false positives on the first r
 - The two cosmetic Bases gaps from v0.1.0 — alphabetical severity sort, and no per-project note
   count — remain open. Neither is worth the syntax risk yet.
 - `plugin.json` still declares `license: Commercial` and the repository carries no `LICENSE` file.
-  Flagged rather than resolved: licensing is a decision, not a cleanup task.
+  Flagged rather than resolved: licensing is a decision, not a cleanup task. *(Resolved in v0.1.7:
+  the repository is Apache-2.0.)*
 
 ---
 

@@ -341,8 +341,10 @@ the inventory independently: 12 skills, 2 agents, 2 hooks, 0 MCP servers, 0 LSP 
 **Live distillation.** A real headless session writing a real Session note was verified during
 Phase 3 development across three runs, recorded in the
 [vault changelog](vault/Throughline/98%20Meta/Vault%20Changelog.md) v0.1.4. The later changes to how
-the distiller is launched — the guard variable, and git facts in place of a shell — are covered by
-the stub test above but have not yet been re-run against a live model.
+the distiller is launched were re-verified live on 2026-10-02 against the installed 0.3.1 plugin: one
+session produced exactly one Session note with a local-time filename, no second distillation, and an
+untouched pre-existing vault (changelog v0.1.7). That was one trivial session, so it did not exercise
+a distiller that chooses to emit draft notes — that path is covered by the stub test above.
 
 **Known limitations of this validation.**
 
@@ -461,4 +463,4 @@ than any individual feature, is the artefact worth reading.
 
 ---
 
-*Prototype. Not deployed, not published, and not licensed for redistribution.*
+*Prototype. Licensed under the [Apache License 2.0](LICENSE).*
